@@ -1,0 +1,43 @@
+spring.application.name=eve-market-backend
+server.port=8080
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+spring.datasource.url=jdbc:postgresql://localhost:5432/evemarket
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.hibernate.ddl-auto=update
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+spring.task.scheduling.pool.size=3
+
+# ── Hibernate batch inserts ───────────────────────────────────────────────────
+spring.jpa.properties.hibernate.jdbc.batch_size=100
+spring.jpa.properties.hibernate.order_inserts=true
+spring.jpa.properties.hibernate.order_updates=true
+
+# ── Scanner config ────────────────────────────────────────────────────────────
+app.scanner.region-ids=10000002,10000043,10000032,10000030,10000042
+app.scanner.poll-interval-ms=300000
+app.scanner.initial-delay-ms=10000
+app.scanner.good-deal-threshold-percent=20.0
+app.scanner.retention-hours=24
+app.scanner.staleness-threshold-hours=1
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+app.cors.allowed-origins=http://localhost:4200
+
+# ── Actuator ─────────────────────────────────────────────────────────────────
+management.endpoints.web.exposure.include=health,info,metrics
+management.endpoint.health.show-details=always
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.level.com.evemarket=INFO
+logging.level.org.springframework.web.reactive=WARN
+
+# ── EVE SSO (OAuth2) ──────────────────────────────────────────────────────────
+# Register your app at https://developers.eveonline.com/ then fill in below:
+eve.sso.client-id=YOUR_CLIENT_ID
+eve.sso.client-secret=YOUR_CLIENT_SECRET
+eve.sso.redirect-uri=http://localhost:8080/api/auth/callback

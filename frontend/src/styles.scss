@@ -1,0 +1,43 @@
+@use '@angular/material' as mat;
+
+// EVE-style dark theme
+$eve-dark-theme: mat.define-theme((
+  color: (
+    theme-type: dark,
+    primary: mat.$cyan-palette,
+    tertiary: mat.$yellow-palette,
+  ),
+  density: (scale: 0)
+));
+
+html {
+  @include mat.all-component-themes($eve-dark-theme);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #0d1117;
+  color: #e0e0e0;
+  font-family: 'Roboto', sans-serif;
+  min-height: 100vh;
+}
+
+// Override mat-table background
+.mat-mdc-table {
+  background: #161b22 !important;
+}
+
+.mat-mdc-row:hover .mat-mdc-cell {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mat-mdc-card {
+  background: #161b22 !important;
+}
+
+// Scrollbar
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
