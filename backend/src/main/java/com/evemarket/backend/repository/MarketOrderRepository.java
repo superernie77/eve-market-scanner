@@ -32,7 +32,7 @@ public interface MarketOrderRepository extends JpaRepository<MarketOrder, Long> 
            "AND (:typeNameLike IS NULL OR LOWER(o.typeName) LIKE LOWER(CONCAT('%', CAST(:typeNameLike AS string), '%'))) " +
            "AND (:categoryName IS NULL OR EXISTS (" +
            "  SELECT 1 FROM ItemType it WHERE it.typeId = o.typeId AND it.categoryName = :categoryName)) " +
-           "ORDER BY o.discountPercent DESC NULLS LAST")
+           "")
     Page<MarketOrder> findFiltered(
             @Param("regionId") Integer regionId,
             @Param("typeId") Integer typeId,

@@ -1,10 +1,10 @@
-import { Component, OnInit, OnDestroy, Output, EventEmitter, inject } from '@angular/core';
-import { Subscription } from 'rxjs';
+import { Component, OnInit, OnDestroy, AfterViewInit, Output, EventEmitter, ViewChild, inject } from '@angular/core';
+import { Subscription, merge } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder } from '@angular/forms';
 import { MatTableModule } from '@angular/material/table';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
-import { MatSortModule } from '@angular/material/sort';
+import { MatSortModule, MatSort, Sort } from '@angular/material/sort';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -94,7 +94,7 @@ import { MarketOffer, Page } from '../../models/market-offer.model';
         <mat-spinner diameter="48"></mat-spinner>
       </div>
 
-      <table mat-table [dataSource]="orders" class="market-table">
+      <table mat-table [dataSource]="orders" matSort (matSortChange)="onSortChange($event)" class="market-table">
 
         <ng-container matColumnDef="favourite">
           <th mat-header-cell *matHeaderCellDef class="fav-col"></th>
@@ -109,7 +109,7 @@ import { MarketOffer, Page } from '../../models/market-offer.model';
         </ng-container>
 
         <ng-container matColumnDef="typeName">
-          <th mat-header-cell *matHeaderCellDef>Item</th>
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Item</th>
           <td mat-cell *matCellDef="let row">
             <span class="item-name">{{ row.typeName }}</span>
             <span class="type-id">#{{ row.typeId }}</span>
@@ -124,7 +124,7 @@ import { MarketOffer, Page } from '../../models/market-offer.model';
         </ng-container>
 
         <ng-container matColumnDef="price">
-          <th mat-header-cell *matHeaderCellDef>Price (ISK)</th>
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Price (ISK)</th>
           <td mat-cell *matCellDef="let row">{{ row.price | number:'1.2-2' }}</td>
         </ng-container>
 
@@ -136,7 +136,7 @@ import { MarketOffer, Page } from '../../models/market-offer.model';
         </ng-container>
 
         <ng-container matColumnDef="discountPercent">
-          <th mat-header-cell *matHeaderCellDef>Discount</th>
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Discount</th>
           <td mat-cell *matCellDef="let row">
             <span *ngIf="row.discountPercent != null"
                   [class.good-deal]="row.discountPercent >= 20"
@@ -255,6 +255,8 @@ export class MarketTableComponent implements OnInit, OnDestroy {
   private favouritesService = inject(FavouritesService);
   private fb = inject(FormBuilder);
 
+  @ViewChild(MatSort) matSort!: MatSort;
+
   displayedColumns = ['favourite', 'typeName', 'systemName', 'price', 'averagePrice', 'discountPercent',
                       'volumeRemain', 'isBuyOrder', 'range', 'discoveredAt'];
 
@@ -263,6 +265,8 @@ export class MarketTableComponent implements OnInit, OnDestroy {
   pageSize = 50;
   currentPage = 0;
   loading = false;
+  sortBy = 'discountPercent';
+  sortDir = 'desc';
   favouriteTypeIds = new Set<number>();
   private favSub!: Subscription;
 
@@ -330,7 +334,9 @@ export class MarketTableComponent implements OnInit, OnDestroy {
       typeName: v.typeNameSearch ?? null,
       categoryName: v.categoryName ?? null,
       page: this.currentPage,
-      size: this.pageSize
+      size: this.pageSize,
+      sortBy: this.sortBy,
+      sortDir: this.sortDir
     };
 
     this.marketService.getOrders(filter).subscribe({
@@ -346,6 +352,13 @@ export class MarketTableComponent implements OnInit, OnDestroy {
   onPageChange(event: PageEvent) {
     this.currentPage = event.pageIndex;
     this.pageSize = event.pageSize;
+    this.loadOrders();
+  }
+
+  onSortChange(sort: Sort) {
+    this.sortBy = sort.active || 'discountPercent';
+    this.sortDir = sort.direction || 'desc';
+    this.currentPage = 0;
     this.loadOrders();
   }
 

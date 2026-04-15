@@ -56,9 +56,17 @@ public class MarketController {
             @RequestParam(required = false) String typeName,
             @RequestParam(required = false) String categoryName,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(defaultValue = "discountPercent") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
 
-        PageRequest pageable = PageRequest.of(page, size, Sort.by("discountPercent").descending());
+        Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        String sortField = List.of("typeName", "price", "discountPercent", "discoveredAt", "volumeRemain").contains(sortBy)
+                ? sortBy : "discountPercent";
+        Sort sort = sortField.equals("discountPercent")
+                ? Sort.by(Sort.Order.by("discountPercent").nullsLast().with(direction))
+                : Sort.by(direction, sortField);
+        PageRequest pageable = PageRequest.of(page, size, sort);
         String typeNameLike = (typeName != null && !typeName.isBlank()) ? typeName.trim() : null;
 
         return marketOrderRepository

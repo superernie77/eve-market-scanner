@@ -16,6 +16,8 @@ export interface OrderFilter {
   categoryName?: string | null;
   page?: number;
   size?: number;
+  sortBy?: string;
+  sortDir?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -48,6 +50,12 @@ export class MarketService {
     }
     if (filter.categoryName != null) {
       params = params.set('categoryName', filter.categoryName);
+    }
+    if (filter.sortBy != null) {
+      params = params.set('sortBy', filter.sortBy);
+    }
+    if (filter.sortDir != null) {
+      params = params.set('sortDir', filter.sortDir);
     }
 
     return this.http.get<Page<MarketOffer>>(`${API_BASE}/orders`, { params });
