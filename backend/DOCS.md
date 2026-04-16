@@ -1,7 +1,7 @@
 # Backend Documentation
 
 ## Overview
-Spring Boot 3.5 / Java 21 REST API that periodically scans EVE Online market orders via the ESI public API, persists them to an H2 file database, and exposes endpoints for filtered order browsing, deal detection, and inter-regional arbitrage analysis. Supports EVE SSO OAuth2 login to fetch the authenticated character's (and their corporation's) active sell orders.
+Spring Boot 3.5 / Java 21 REST API that periodically scans EVE Online market orders via the public ESI API, persists them to PostgreSQL, and exposes endpoints for filtered/sorted order browsing, deal detection, inter-regional arbitrage analysis, and favourite item management. Supports EVE SSO OAuth2 login to fetch the authenticated character's (and their corporation's) active sell orders.
 
 ---
 
@@ -12,19 +12,25 @@ Spring Boot 3.5 / Java 21 REST API that periodically scans EVE Online market ord
 ./mvnw spring-boot:run
 ```
 
-Starts on **http://localhost:8080**. H2 console available at **http://localhost:8080/h2-console** (JDBC URL: `jdbc:h2:file:./data/evemarket`, user: `sa`, password: empty).
+Starts on **http://localhost:8080**.
 
 ---
 
 ## Configuration (`src/main/resources/application.properties`)
 
+Copy `application.properties.example` and fill in secrets.
+
 | Key | Default | Description |
 |-----|---------|-------------|
-| `app.scanner.region-ids` | 4 hub regions | Comma-separated EVE region IDs to scan |
+| `spring.datasource.url` | `jdbc:postgresql://localhost:5432/evemarket` | PostgreSQL connection |
+| `spring.datasource.username` | `postgres` | DB user |
+| `spring.datasource.password` | `postgres` | DB password |
+| `app.scanner.region-ids` | 5 hub regions | Comma-separated EVE region IDs to scan |
 | `app.scanner.poll-interval-ms` | `300000` | Scan interval (5 min = ESI cache TTL) |
 | `app.scanner.initial-delay-ms` | `10000` | Delay before first scan after startup |
 | `app.scanner.good-deal-threshold-percent` | `20.0` | Min discount % to flag as a good deal |
-| `app.scanner.retention-hours` | `24` | Hours before old order snapshots are deleted |
+| `app.scanner.retention-hours` | `24` | Hours before old order snapshots are purged |
+| `app.scanner.staleness-threshold-hours` | `1` | Skip ESI fetch if region data is fresher than this |
 | `eve.sso.client-id` | — | EVE developer app Client ID |
 | `eve.sso.client-secret` | — | EVE developer app Secret Key |
 | `eve.sso.redirect-uri` | `http://localhost:8080/api/auth/callback` | OAuth2 callback URL |
@@ -36,36 +42,45 @@ Starts on **http://localhost:8080**. H2 console available at **http://localhost:
 
 ```
 com.evemarket.backend
-├── EveMarketBackendApplication.java   Entry point — enables scheduling + SSO config
+├── EveMarketBackendApplication.java
 │
 ├── config/
 │   ├── EveSsoConfig.java              @ConfigurationProperties for eve.sso.*
-│   ├── WebClientConfig.java           WebClient bean with timeouts + User-Agent header
+│   ├── WebClientConfig.java           WebClient bean with timeouts + User-Agent
 │   └── CorsConfig.java                CORS for /api/** → localhost:4200
 │
 ├── model/
 │   ├── MarketOrder.java               JPA entity — one row per sell order per scan
-│   └── ItemType.java                  JPA entity — cached ESI item type metadata
+│   ├── ItemType.java                  JPA entity — cached ESI type metadata
+│   └── Favourite.java                 JPA entity — starred items (typeId PK)
 │
 ├── dto/
 │   ├── EsiMarketOrderDto.java         Maps raw ESI JSON (snake_case) to Java
 │   ├── MarketOfferDto.java            API response DTO for individual orders
-│   └── ArbitrageOpportunityDto.java   API response DTO for arbitrage results
+│   ├── ArbitrageOpportunityDto.java   API response DTO for arbitrage results
+│   ├── FavouriteDto.java              { typeId, typeName }
+│   ├── MyOrderDto.java                Character/corp active sell order
+│   ├── TransactionDto.java            Corporation transaction entry
+│   └── WalletDto.java                 Wallet balance summary
 │
 ├── repository/
-│   ├── MarketOrderRepository.java     JPA queries: findFiltered, findTopDeals, findMinSellPrice
-│   └── ItemTypeRepository.java        findByCategoryNameIsNull, findDistinctCategoryNames
+│   ├── MarketOrderRepository.java     Filtered/sorted queries + arbitrage aggregation
+│   ├── ItemTypeRepository.java        Category enrichment queries
+│   └── FavouriteRepository.java       CRUD for starred items
 │
 ├── service/
 │   ├── EsiService.java                ESI API calls: orders, prices, names, categories
-│   ├── MarketScannerService.java      @Scheduled scan loop — orchestrates full scan cycle
+│   ├── MarketScannerService.java      @Scheduled scan loop
 │   ├── ArbitrageService.java          Cross-region price gap analysis
-│   ├── CharacterSession.java          Singleton: holds logged-in character's token + info
-│   └── EveSsoService.java             OAuth2 exchange, token refresh, character/corp orders
+│   ├── CharacterSession.java          Singleton: logged-in character token + info
+│   └── EveSsoService.java             OAuth2 exchange, refresh, char/corp orders
 │
 └── controller/
-    ├── MarketController.java          REST endpoints: orders, arbitrage, stats, scan trigger
-    └── AuthController.java            REST endpoints: login, callback, logout, status
+    ├── MarketController.java          Orders, arbitrage, stats, scan trigger
+    ├── FavouriteController.java       Favourite CRUD
+    ├── AuthController.java            Login, callback, logout, status
+    ├── TransactionController.java     Corp transaction history
+    └── WalletController.java          Wallet balance
 ```
 
 ---
@@ -93,8 +108,6 @@ com.evemarket.backend
 | `issued` | TIMESTAMP | When EVE created the order |
 | `discovered_at` | TIMESTAMP | When this app first saw it |
 
-Indexes: `(type_id, region_id, discovered_at)`, `(is_buy_order, type_id, region_id, price)`
-
 ### `item_types`
 | Column | Type | Notes |
 |--------|------|-------|
@@ -103,7 +116,13 @@ Indexes: `(type_id, region_id, discovered_at)`, `(is_buy_order, type_id, region_
 | `group_id` | INT | ESI group ID |
 | `group_name` | VARCHAR | Group name |
 | `category_id` | INT | ESI category ID |
-| `category_name` | VARCHAR | Category name (populated async) |
+| `category_name` | VARCHAR | Populated async after each scan |
+
+### `favourites`
+| Column | Type | Notes |
+|--------|------|-------|
+| `type_id` | INT PK | EVE type ID (natural key) |
+| `type_name` | VARCHAR | Item name (denormalised for display) |
 
 ---
 
@@ -111,15 +130,16 @@ Indexes: `(type_id, region_id, discovered_at)`, `(is_buy_order, type_id, region_
 
 ```
 1. AtomicBoolean guard — skip if already scanning
-2. For each region:
-   a. Fetch all sell orders (paginated via X-Pages header, max 5 concurrent pages)
-   b. Fetch ESI average prices
-   c. Compute discountPercent + isGoodDeal flags
-3. Batch-resolve type names (POST /universe/names/, 1000 IDs per call)
-4. Batch-resolve system names
-5. Save in batches of 5000 (avoids huge transactions)
-6. Delete orders older than retention-hours
-7. Spawn virtual thread → enrich item categories (3-step: type→group→category)
+2. Fetch ESI average prices for all items
+3. For each configured region:
+   a. Check staleness — skip ESI fetch if data is fresh enough
+   b. Fetch all sell orders (paginated, up to 5 concurrent pages via WebFlux)
+   c. Batch-resolve type names (POST /universe/names/, 1000 IDs per call)
+   d. Batch-resolve system names
+   e. Compute discountPercent + isGoodDeal flags
+   f. Save in batches of 5000
+4. Purge orders older than retention-hours
+5. Spawn virtual thread → enrich item categories (type → group → category)
 ```
 
 ---
@@ -127,42 +147,29 @@ Indexes: `(type_id, region_id, discovered_at)`, `(is_buy_order, type_id, region_
 ## REST API
 
 ### `GET /api/market/orders`
-Paginated, filterable list of market orders.
+Paginated, filterable, sortable list of market orders.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `regionId` | int | 10000002 | EVE region ID |
-| `typeId` | int | — | Filter by exact item type ID |
-| `goodDealsOnly` | bool | false | Only return flagged good deals |
+| `regionId` | int | — | EVE region ID (omit for all regions) |
+| `typeId` | int | — | Exact item type ID |
+| `goodDealsOnly` | bool | false | Only flagged good deals |
 | `isBuyOrder` | bool | — | true=buy, false=sell, omit=both |
 | `minAveragePrice` | decimal | — | Min ESI average price (ISK) |
 | `maxAveragePrice` | decimal | — | Max ESI average price (ISK) |
 | `typeName` | string | — | Partial case-insensitive name match |
-| `categoryName` | string | — | Exact category name match |
+| `categoryName` | string | — | Exact category name |
 | `page` | int | 0 | Page number (0-based) |
 | `size` | int | 50 | Page size |
+| `sortBy` | string | `discountPercent` | Column: `typeName`, `price`, `discountPercent`, `discoveredAt`, `volumeRemain` |
+| `sortDir` | string | `desc` | `asc` or `desc` |
 
 Returns: Spring Data `Page<MarketOfferDto>`
 
 ---
 
-### `GET /api/market/top-deals`
-Top 10 orders by discount % in a region.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `regionId` | int | 10000002 | EVE region ID |
-| `minAveragePrice` | decimal | — | Min ESI average price |
-| `maxAveragePrice` | decimal | — | Max ESI average price |
-| `typeName` | string | — | Partial name match |
-| `categoryName` | string | — | Exact category match |
-
-Returns: `List<MarketOfferDto>`
-
----
-
 ### `GET /api/market/arbitrage`
-Inter-regional arbitrage opportunities — items with the biggest sell price gap between the 4 scanned regions.
+Inter-regional arbitrage opportunities.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -170,78 +177,39 @@ Inter-regional arbitrage opportunities — items with the biggest sell price gap
 | `maxAveragePrice` | decimal | — | Max ESI average price |
 | `typeName` | string | — | Partial name match |
 | `categoryName` | string | — | Exact category match |
-| `minGapPercent` | double | 5.0 | Minimum price gap % to include |
-| `limit` | int | 100 | Max results returned |
+| `minGapPercent` | double | 5.0 | Minimum price gap % |
+| `limit` | int | 100 | Max results |
+| `typeIds` | int list | — | Comma-separated type IDs; bypasses limit when set (used by Fav Arbitrage tab) |
 
 Returns: `List<ArbitrageOpportunityDto>`
 
-**Algorithm:**
-1. Native SQL aggregates `MIN(price)` per `(type_id, region_id)` for sell orders
-2. Java groups by typeId, finds cheapest and priciest region
-3. Computes `gap = (max - min) / min × 100`
-4. Filters by `minGapPercent`, sorts descending, truncates to `limit`
-5. If a character is logged in: fetches their personal + corp sell orders, sets `alreadyListed = true` on matching rows
+**`alreadyListed` flag:** set when the logged-in character (or their corp) has an active sell order for that `typeId` in the sell region.
 
 ---
 
-### `GET /api/market/categories`
-Returns `List<String>` of distinct category names known from enriched item types. Populated progressively in the background after each scan.
+### `GET /api/favourites`
+Returns `List<FavouriteDto>` of starred items.
+
+### `POST /api/favourites`
+Body: `{ typeId, typeName }`. Adds a favourite (upsert by PK).
+
+### `DELETE /api/favourites/{typeId}`
+Removes a favourite.
 
 ---
 
-### `GET /api/market/stats`
-Returns `{ totalOrders, goodDeals, regionId }`.
+### `GET /api/auth/login` / `GET /api/auth/callback` / `POST /api/auth/logout` / `GET /api/auth/status`
+Standard EVE SSO OAuth2 flow. `status` returns `{ loggedIn, characterName }`.
 
 ---
 
 ### `POST /api/market/scan`
-Triggers an immediate scan on a background thread. Returns `{ status: "scan triggered" }`.
-
----
-
-### `GET /api/auth/login`
-Redirects the browser to the EVE SSO authorization page. Stores a random `state` value in the HTTP session for CSRF protection.
-
----
-
-### `GET /api/auth/callback?code=...&state=...`
-EVE SSO redirects here after the user approves. Validates state, exchanges code for tokens, fetches corporation ID, then redirects to `http://localhost:4200?login=success`.
-
----
-
-### `POST /api/auth/logout`
-Clears the in-memory `CharacterSession`. Returns `{ status: "logged out" }`.
-
----
-
-### `GET /api/auth/status`
-Returns `{ loggedIn: bool, characterName: string }`. Used by the frontend on every load to check auth state.
-
----
-
-## EVE SSO Flow
-
-```
-Browser                  Backend (:8080)              EVE SSO
-  │── GET /api/auth/login ──>│                             │
-  │<── 302 to SSO ───────────│── /oauth/authorize ────>    │
-  │                          │                   <── 302 ──│
-  │── GET /callback?code=X ─>│                             │
-  │                          │── POST /oauth/token ────>   │
-  │                          │<── { access_token, ... } ───│
-  │                          │  decode JWT sub → charId    │
-  │                          │── GET /characters/{id}/ ──> │ (ESI)
-  │<── 302 to :4200 ─────────│                             │
-```
-
-Token is stored in `CharacterSession` singleton. On each arbitrage request, `refreshIfNeeded()` is called before fetching orders.
+Triggers an immediate scan on a background thread.
 
 ---
 
 ## Adding a New Scanned Region
 
-In `application.properties`:
-```properties
-app.scanner.region-ids=10000002,10000043,10000032,10000030,YOUR_REGION_ID
-```
-Add the region name to `ArbitrageService.REGION_NAMES` map. Restart backend.
+1. In `application.properties`: append the region ID to `app.scanner.region-ids`
+2. Add the region name to `ArbitrageService.REGION_NAMES` map
+3. Restart backend

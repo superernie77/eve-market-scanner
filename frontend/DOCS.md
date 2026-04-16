@@ -1,7 +1,7 @@
 # Frontend Documentation
 
 ## Overview
-Angular 20 standalone-component SPA. Displays EVE Online market data fetched from the Spring Boot backend. Two main views: **All Orders** (paginated table with good-deal detection) and **Arbitrage** (inter-regional price gap finder with EVE SSO login integration).
+Angular 20 standalone-component SPA. Displays EVE Online market data from the Spring Boot backend. Features a persistent toolbar with centralised EVE SSO login, and five tabs: All Orders, Arbitrage, Fav Arbitrage, My Orders / Buy Orders, Corp Transactions, and Wallet.
 
 ---
 
@@ -12,7 +12,7 @@ Angular 20 standalone-component SPA. Displays EVE Online market data fetched fro
 npx ng serve --open
 ```
 
-Starts on **http://localhost:4200** with hot-reload. Requires backend running on **http://localhost:8080**.
+Starts on **http://localhost:4200** with hot-reload. Requires backend on **http://localhost:8080**.
 
 ---
 
@@ -20,26 +20,27 @@ Starts on **http://localhost:4200** with hot-reload. Requires backend running on
 
 ```
 src/app/
-├── app.ts                          Root component — toolbar + tab layout
+├── app.ts                          Root — toolbar (auth) + mat-tab-group
 ├── app.config.ts                   Angular providers (HttpClient, animations)
-├── app.routes.ts                   Routes (currently empty — SPA with no routing)
 │
 ├── models/
 │   └── market-offer.model.ts       TypeScript interfaces for all API responses
 │
 ├── services/
-│   ├── market.service.ts           HTTP client for all /api/market/* endpoints
-│   └── auth.service.ts             HTTP client for /api/auth/* + login redirect
+│   ├── market.service.ts           HTTP client for /api/market/* endpoints
+│   ├── auth.service.ts             HTTP client for /api/auth/* + login redirect
+│   └── favourites.service.ts       BehaviorSubject-backed favourites state + HTTP
 │
 └── components/
-    ├── stats-bar/
-    │   └── stats-bar.ts            Total orders count + "Trigger Scan" button
-    ├── top-deals/
-    │   └── top-deals.ts            Sidebar: top 10 deals in The Forge
-    ├── market-table/
-    │   └── market-table.ts         All Orders tab — paginated filtered table
-    └── arbitrage/
-        └── arbitrage.ts            Arbitrage tab — cross-region opportunities + EVE login
+    ├── market-table/               All Orders tab
+    ├── arbitrage/                  Arbitrage tab
+    ├── favourite-arbitrage/        Fav Arbitrage tab
+    ├── my-orders/                  My Sell Orders tab
+    ├── my-buy-orders/              My Buy Orders tab
+    ├── corp-transactions/          Corp Transactions tab
+    ├── wallet/                     Wallet tab
+    ├── stats-bar/                  (unused — kept for reference)
+    └── top-deals/                  (unused — kept for reference)
 ```
 
 ---
@@ -47,208 +48,178 @@ src/app/
 ## Models (`models/market-offer.model.ts`)
 
 ```typescript
-MarketOffer          // Single market order (orders table + top-deals)
-Page<T>              // Spring Data page wrapper
-MarketStats          // { totalOrders, goodDeals, regionId }
-ArbitrageOpportunity // One cross-region price gap result
-ArbitrageFilter      // Filter params for the arbitrage endpoint
-```
-
-### `ArbitrageOpportunity`
-```typescript
-{
-  typeId: number;
-  typeName: string;
-  buyRegionId: number;    // cheapest region
-  buyRegionName: string;
-  buyPrice: number;
-  sellRegionId: number;   // most expensive region
-  sellRegionName: string;
-  sellPrice: number;
-  gapPercent: number;     // (sell - buy) / buy × 100
-  volumeAvailable: number;
-  averagePrice: number | null;
-  alreadyListed: boolean; // true if character has active sell order for this item
-}
+MarketOffer           // Single market order
+Page<T>               // Spring Data page: { content, page: { totalElements, ... } }
+MarketStats           // { totalOrders, goodDeals, regionId }
+ArbitrageOpportunity  // Cross-region price gap result
+ArbitrageFilter       // Filter params for the arbitrage endpoint
+Favourite             // { typeId, typeName }
+MyOrder               // Active sell/buy order for logged-in character
 ```
 
 ---
 
 ## Services
 
-### `MarketService` (`services/market.service.ts`)
+### `MarketService`
 
-Base URL: `http://localhost:8080/api/market`
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `getOrders(filter)` | `GET /orders` | Paginated orders |
-| `getTopDeals(regionId, min, max, name, cat)` | `GET /top-deals` | Top 10 deals |
-| `getCategories()` | `GET /categories` | List of category names |
-| `getStats(regionId)` | `GET /stats` | Order counts |
-| `triggerScan()` | `POST /scan` | Force immediate scan |
-| `getArbitrageOpportunities(filter)` | `GET /arbitrage` | Arbitrage results |
+| Method | Description |
+|--------|-------------|
+| `getOrders(filter)` | Paginated orders with optional sort (`sortBy`, `sortDir`) |
+| `getCategories()` | List of known category names |
+| `triggerScan()` | Trigger immediate backend scan |
+| `getArbitrageOpportunities(filter)` | Arbitrage results (supports `typeIds` for favourites) |
+| `getMyOrders()` | Character's active sell orders |
+| `getMyBuyOrders()` | Character's active buy orders |
+| `getWallet()` | Wallet balance |
+| `getCorpTransactions()` | Corp transaction history |
 
 **`OrderFilter` interface:**
 ```typescript
 {
-  regionId?: number;
+  regionId?: number;           // omit = all regions
   typeId?: number | null;
   goodDealsOnly?: boolean;
   isBuyOrder?: boolean | null;
-  minAveragePrice?: number | null;  // absolute ISK value
+  minAveragePrice?: number | null;   // absolute ISK
   maxAveragePrice?: number | null;
-  typeName?: string | null;         // partial match
+  typeName?: string | null;
   categoryName?: string | null;
   page?: number;
   size?: number;
+  sortBy?: string;             // typeName | price | discountPercent | discoveredAt | volumeRemain
+  sortDir?: string;            // asc | desc
 }
 ```
 
 ---
 
-### `AuthService` (`services/auth.service.ts`)
-
-Base URL: `http://localhost:8080/api/auth`
+### `AuthService`
 
 | Method | Description |
 |--------|-------------|
 | `getStatus()` | `Observable<{ loggedIn, characterName }>` |
-| `login()` | `window.location.href` redirect to backend login |
-| `logout()` | POST to clear server session |
+| `login()` | `window.location.href` redirect to backend SSO endpoint |
+| `logout()` | POST `/api/auth/logout` |
+
+---
+
+### `FavouritesService`
+
+Maintains a `BehaviorSubject<Favourite[]>` so all components see live favourite state.
+
+| Member | Description |
+|--------|-------------|
+| `favourites$` | Observable of current favourite list |
+| `favouriteTypeIds` | `Set<number>` of starred type IDs (computed getter) |
+| `load()` | Fetch favourites from backend and push to subject |
+| `add(typeId, typeName)` | POST to backend + update subject |
+| `remove(typeId)` | DELETE on backend + update subject |
+| `isFavourite(typeId)` | Synchronous check |
 
 ---
 
 ## Components
 
 ### `App` (`app.ts`)
-Root shell. Contains:
-- Material toolbar with title
-- `<app-stats-bar>` above the content grid
-- Two-column layout: `<mat-tab-group>` (left) + `<app-top-deals>` sidebar (right)
-- Tab 1: `<app-market-table>` — emits `minAvgPriceMillionChange` and `categoryNameChange` to keep top-deals in sync
-- Tab 2: `<app-arbitrage>`
+Root shell. Toolbar contains:
+- App title
+- Login button (gold, shown when logged out)
+- Character name chip + logout icon (shown when logged in)
+
+Content: `<mat-tab-group>` with all feature tabs. Auth status is checked once in `ngOnInit`; per-tab components check it independently for content guards only.
 
 ---
 
-### `StatsBarComponent` (`components/stats-bar/stats-bar.ts`)
-Shows total order count and number of good deals. Has a "Trigger Scan" button that calls `POST /api/market/scan`. Polls stats every 30 seconds.
+### `MarketTableComponent` — All Orders tab
+
+Paginated, server-side sorted table of market orders across all regions (or a selected region).
+
+**Filters (applied on "Apply" click):**
+| Control | Description |
+|---------|-------------|
+| Search Item Name | Partial case-insensitive match |
+| Type ID | Exact match |
+| Region | All Regions or a specific trade hub |
+| Order Type | Both / Sell / Buy |
+| Category | From `/api/market/categories` |
+| Good Deals Only | ≥20% below ESI average |
+| Avg. Price Range | Slider 0–1B ISK (1B = no limit) |
+
+**Sortable columns** (click header to toggle ASC/DESC):
+- Item (name)
+- Price
+- Discount
+
+Default sort: Discount descending. Sort triggers a fresh server fetch (no client-side reorder).
+
+**Star column:** click ★ to add/remove from favourites. Filled gold star = currently favourited.
+
+**Pagination:** 25 / 50 / 100 rows per page.
 
 ---
 
-### `TopDealsComponent` (`components/top-deals/top-deals.ts`)
-Sidebar showing the top 10 discounted sell orders in **The Forge** (Jita). Receives `minAvgPriceMillion` and `categoryName` as `@Input()` from the root app and reloads via `ngOnChanges` when they change (only updates when the user clicks Apply in the All Orders tab).
+### `ArbitrageComponent` — Arbitrage tab
 
----
+Finds items where the minimum sell price in one region is significantly lower than in another.
 
-### `MarketTableComponent` (`components/market-table/market-table.ts`)
+**Filters:** Name search, Category, Min Gap %, Avg. Price Range slider.
 
-**All Orders tab.** Paginated, sortable table of market orders.
-
-**Filters (applied on "Apply" button click):**
-| Control | Type | Description |
-|---------|------|-------------|
-| Search Item Name | text | Partial case-insensitive name match |
-| Type ID | number | Exact type ID |
-| Order Type | select | Both / Sell / Buy |
-| Category | select | From `/api/market/categories` |
-| Good Deals Only | checkbox | ≥20% below ESI average |
-| Avg. Price Range | range slider | 0–1B ISK (1B = no upper limit) |
-
-**Form controls (all in `filterForm`):**
-- `typeNameSearch` — string
-- `typeId` — number
-- `isBuyOrder` — boolean | null
-- `goodDealsOnly` — boolean (default false)
-- `minAvgPriceMillion` — number (default 100)
-- `maxAvgPriceMillion` — number (default 1000 = no limit)
-- `categoryName` — string | null
-
-**`applyFilters()` method** — resets page to 0, emits `@Output` events for sidebar sync, calls `loadOrders()`.
-
-**Pagination** — `onPageChange()` triggers `loadOrders()` immediately (no button needed).
-
-**Table columns:** Item, System, Price, Avg Price, Discount, Volume, Type (buy/sell badge), Range, Discovered
+**Table columns:** Item, Buy In (region badge), Buy Price, Sell In (region badge), Sell Price, Gap %, Volume
 
 **Visual cues:**
-- Discount ≥20%: green bold text + green row background
-- Discount 10–19%: orange text
-- Jita orders: gold system name
+- Region badges: gold=The Forge, red=Domain, blue=Sinq Laison, green=Heimatar, purple=Metropolis
+- Gap colours: orange ≥5%, green ≥20%, bright green ≥100%
+- Already-listed rows: greyed out with `opacity: 0.3` + tooltip (requires EVE login)
 
 ---
 
-### `ArbitrageComponent` (`components/arbitrage/arbitrage.ts`)
+### `FavouriteArbitrageComponent` — Fav Arbitrage tab
 
-**Arbitrage tab.** Finds items where the cheapest sell price in one region is significantly lower than in another — a "buy here, sell there" opportunity.
+Shows arbitrage opportunities only for starred items. Already-listed rows are hidden entirely (not just greyed).
 
-**Filters (applied on "Apply" button click):**
-| Control | Type | Description |
-|---------|------|-------------|
-| Search Item Name | text | Partial name match |
-| Category | select | From `/api/market/categories` |
-| Min Gap % | number input | Minimum price gap (default 5%) |
-| Avg. Price Range | range slider | 0–1B ISK (same as All Orders) |
-
-**Authentication panel** (top-right of filter bar):
-- Not logged in → "Login with EVE Online" button
-- Logged in → character name chip + logout button
-
-**`ngOnInit` sequence:**
-1. Load categories
-2. `checkAuth()` → calls `/api/auth/status`, stores `isLoggedIn` + `characterName`; if logged in, triggers a `load()` to get `alreadyListed` flags
-3. Initial `load()`
-
-**Table columns:** Item, Buy In (region badge), Buy Price, Sell In (region badge), Sell Price, Gap %, Volume, Avg Price
-
-**Visual cues:**
-- Region badges: gold=The Forge, red=Domain, blue=Sinq Laison, green=Heimatar
-- Gap colour: orange ≥5%, green ≥20%, bright green ≥50%
-- Already-listed rows: `opacity: 0.3`, `filter: grayscale(0.9)` — item greyed out with tooltip
+- Watched items shown as removable chips at the top
+- Default min gap: **35%**
+- Default sort: **Buy In descending**
+- Opportunity counter shows only visible (non-hidden) rows
+- Passes `typeIds` to backend so the limit/ranking problem doesn't affect results
 
 ---
 
-## Filter → API Flow
+### Auth-gated tabs (My Orders, My Buy Orders, Corp Transactions, Wallet)
 
-```
-User sets filters → clicks "Apply"
-  → applyFilters() / load()
-    → MarketService.getOrders() / getArbitrageOpportunities()
-      → HttpParams built from non-null filter values
-        → GET /api/market/orders?... (or /arbitrage?...)
-          → Table updates
-```
-
-Slider values are stored as **millions of ISK** in the form, multiplied by `1_000_000` before sending to the API. Max slider (1000) sends no `maxAveragePrice` param (backend treats null as no limit).
+All follow the same pattern:
+- `ngOnInit` calls `authService.getStatus()` → sets `isLoggedIn`
+- If logged in: load data immediately
+- Template: shows "Please log in" empty state when `!isLoggedIn`, otherwise shows data table + Refresh button
+- No login/logout UI in these tabs — auth is handled by the toolbar
 
 ---
 
 ## EVE SSO Login Flow (Frontend)
 
 ```
-1. User clicks "Login with EVE Online"
+1. User clicks "Login with EVE Online" in toolbar
 2. authService.login() → window.location.href = 'http://localhost:8080/api/auth/login'
-3. Browser navigates through EVE SSO (handled entirely by backend)
+3. Browser navigates through EVE SSO (handled by backend)
 4. Browser lands on http://localhost:4200?login=success
-5. ArbitrageComponent.checkAuth() → GET /api/auth/status → isLoggedIn = true
-6. load() called → arbitrage results now include alreadyListed flags
-7. Rows with alreadyListed=true rendered with grey-out CSS
+5. app.ts ngOnInit → getStatus() → isLoggedIn = true, characterName shown in toolbar
+6. Auth-gated tabs check status independently and load their data
+7. Arbitrage tab re-fetches to get alreadyListed flags
 ```
 
 ---
 
-## Styling Notes
-- Uses Angular Material dark theme with cyan (`#4dd0e1`) accent
-- All components use inline styles (no separate `.scss` files)
-- `mat-slider` range variant: `matSliderStartThumb` + `matSliderEndThumb`
-- Table row classes applied via `[class.deal-row]`, `[class.already-listed]`, `[class.high-gap]`
+## Slider Convention
+
+Slider values are stored in **millions of ISK** in the form controls. They are multiplied by `1_000_000` before being sent to the API. The max value (1000 = 1B ISK) is treated as "no upper limit" — `maxAveragePrice` is not sent to the backend.
 
 ---
 
-## Adding a New Filter
+## Adding a New Filter to All Orders
 
-1. Add form control to `filterForm` in the component
-2. Add the input element in the template
-3. Read the value in `loadOrders()` / `load()` and pass it to the service method
-4. Add the param to `OrderFilter` / `ArbitrageFilter` in `market-offer.model.ts`
-5. Add `if (filter.newParam != null) params = params.set(...)` in `market.service.ts`
-6. Add the `@RequestParam` + query condition in the backend repository + controller
+1. Add form control to `filterForm` in `market-table.ts`
+2. Add the UI control in the template
+3. Read the value in `loadOrders()` and add it to the `OrderFilter`
+4. Add the field to `OrderFilter` in `market.service.ts` and pass it as an `HttpParams` entry
+5. Add `@RequestParam` to the backend controller and wire it into the repository query
