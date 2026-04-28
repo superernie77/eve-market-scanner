@@ -1,5 +1,7 @@
 package com.evemarket.backend.service;
 
+import com.evemarket.backend.dto.EsiContractDto;
+import com.evemarket.backend.dto.EsiContractItemDto;
 import com.evemarket.backend.dto.EsiMarketOrderDto;
 import com.evemarket.backend.model.ItemType;
 import com.evemarket.backend.repository.ItemTypeRepository;
@@ -290,6 +292,112 @@ public class EsiService {
     }
 
     private record GroupInfo(int groupId, String groupName, int categoryId) {}
+
+    // ── Contracts ─────────────────────────────────────────────────────────────
+
+    public List<EsiContractDto> fetchContracts(int regionId) {
+        var firstResponse = esiWebClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/contracts/public/{regionId}/")
+                        .queryParam("page", 1)
+                        .build(regionId))
+                .retrieve()
+                .toEntityList(EsiContractDto.class)
+                .onErrorResume(WebClientResponseException.class, e -> {
+                    log.warn("ESI contracts error for region {}: {}", regionId, e.getMessage());
+                    return Mono.empty();
+                })
+                .block();
+
+        if (firstResponse == null || firstResponse.getBody() == null) return List.of();
+
+        List<EsiContractDto> all = new ArrayList<>(firstResponse.getBody());
+        String pagesHeader = firstResponse.getHeaders().getFirst("X-Pages");
+        int totalPages = pagesHeader != null ? Integer.parseInt(pagesHeader) : 1;
+
+        if (totalPages > 1) {
+            List<EsiContractDto> remaining = Flux.range(2, totalPages - 1)
+                    .flatMap(page -> esiWebClient.get()
+                            .uri(uriBuilder -> uriBuilder
+                                    .path("/contracts/public/{regionId}/")
+                                    .queryParam("page", page)
+                                    .build(regionId))
+                            .retrieve()
+                            .bodyToFlux(EsiContractDto.class)
+                            .onErrorResume(WebClientResponseException.class, e -> {
+                                log.warn("ESI contracts page {} error: {}", page, e.getMessage());
+                                return Flux.empty();
+                            }), 5)
+                    .collectList()
+                    .block();
+            if (remaining != null) all.addAll(remaining);
+        }
+
+        log.info("Fetched {} contracts for region {}", all.size(), regionId);
+        return all;
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<Long, List<EsiContractItemDto>> fetchContractItemsBulk(List<Long> contractIds) {
+        Map<Long, List<EsiContractItemDto>> result = new ConcurrentHashMap<>();
+        Flux.fromIterable(contractIds)
+                .flatMap(id -> esiWebClient.get()
+                        .uri("/contracts/public/items/{contractId}/", id)
+                        .retrieve()
+                        .bodyToFlux(EsiContractItemDto.class)
+                        .collectList()
+                        .map(items -> Map.entry(id, items))
+                        .onErrorResume(e -> {
+                            if (e instanceof WebClientResponseException wce && wce.getStatusCode().value() == 403) {
+                                // 403 = contract no longer available (taken/expired between list and item fetch)
+                                return Mono.empty();
+                            }
+                            log.warn("Failed to fetch items for contract {}: {}", id, e.getMessage());
+                            return Mono.empty();
+                        }), 10)
+                .toStream()
+                .forEach(e -> result.put(e.getKey(), e.getValue()));
+        return result;
+    }
+
+    // ── Group ID resolution ───────────────────────────────────────────────────
+
+    @Transactional
+    public Map<Integer, Integer> resolveGroupIdsBatch(Set<Integer> typeIds) {
+        if (typeIds.isEmpty()) return Map.of();
+
+        Map<Integer, Integer> result = new HashMap<>();
+        itemTypeRepository.findAllById(typeIds).stream()
+                .filter(it -> it.getGroupId() != null)
+                .forEach(it -> result.put(it.getTypeId(), it.getGroupId()));
+
+        Set<Integer> missing = typeIds.stream()
+                .filter(id -> !result.containsKey(id))
+                .collect(Collectors.toSet());
+
+        if (missing.isEmpty()) return result;
+
+        log.debug("Resolving {} missing group IDs from ESI", missing.size());
+        Map<Integer, Integer> fetched = new ConcurrentHashMap<>();
+        Flux.fromIterable(missing)
+                .flatMap(id -> fetchTypeGroupId(id)
+                        .map(gid -> Map.entry(id, gid))
+                        .onErrorResume(e -> Mono.empty()), 10)
+                .toStream()
+                .forEach(e -> fetched.put(e.getKey(), e.getValue()));
+
+        result.putAll(fetched);
+
+        if (!fetched.isEmpty()) {
+            List<ItemType> toUpdate = itemTypeRepository.findAllById(fetched.keySet()).stream()
+                    .filter(it -> it.getGroupId() == null)
+                    .peek(it -> it.setGroupId(fetched.get(it.getTypeId())))
+                    .toList();
+            if (!toUpdate.isEmpty()) itemTypeRepository.saveAll(toUpdate);
+        }
+
+        return result;
+    }
 
     @SuppressWarnings("unchecked")
     private void fetchNamesFromEsi(List<Integer> ids, Map<Integer, String> result, List<ItemType> toSave) {

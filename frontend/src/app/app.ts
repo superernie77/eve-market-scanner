@@ -12,6 +12,7 @@ import { WalletComponent } from './components/wallet/wallet';
 import { MyBuyOrdersComponent } from './components/my-buy-orders/my-buy-orders';
 import { CorpTransactionsComponent } from './components/corp-transactions/corp-transactions';
 import { FavouriteArbitrageComponent } from './components/favourite-arbitrage/favourite-arbitrage';
+import { CapitalContractsComponent } from './components/capital-contracts/capital-contracts';
 import { AuthService } from './services/auth.service';
 
 @Component({
@@ -22,7 +23,7 @@ import { AuthService } from './services/auth.service';
     MatButtonModule, MatTooltipModule,
     MarketTableComponent, ArbitrageComponent,
     MyOrdersComponent, MyBuyOrdersComponent, WalletComponent, CorpTransactionsComponent,
-    FavouriteArbitrageComponent
+    FavouriteArbitrageComponent, CapitalContractsComponent
   ],
   template: `
     <mat-toolbar color="primary" class="toolbar">
@@ -64,6 +65,11 @@ import { AuthService } from './services/auth.service';
             <mat-tab label="Fav Arbitrage">
               <div class="tab-content">
                 <app-favourite-arbitrage></app-favourite-arbitrage>
+              </div>
+            </mat-tab>
+            <mat-tab label="Capital Contracts">
+              <div class="tab-content">
+                <app-capital-contracts></app-capital-contracts>
               </div>
             </mat-tab>
             <mat-tab>

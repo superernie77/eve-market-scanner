@@ -1,12 +1,14 @@
 # EVE Market Scanner — Project Overview for Claude
 
 ## What This Is
-A local dev tool that scans EVE Online market orders across 4 major trade hub regions via the public ESI API and surfaces inter-regional arbitrage opportunities. A logged-in EVE character's personal and corporation sell orders are fetched to grey out already-listed items in the arbitrage view.
+A local dev tool that:
+- Scans EVE Online market orders across 4 major trade hub regions via the public ESI API and surfaces inter-regional arbitrage opportunities. A logged-in EVE character's personal and corporation sell orders are fetched to grey out already-listed items in the arbitrage view.
+- Scans public contracts in configurable low-sec regions and filters for capital/super-capital ships. Computes an *effective* capital price by subtracting the universe-average value of non-capital extras from the contract price.
 
 ## Tech Stack
 - **Backend**: Java 21, Spring Boot 3.5, Maven (`./mvnw`), Spring Data JPA, H2 file-based DB, Spring WebFlux (WebClient for reactive ESI calls)
 - **Frontend**: Angular 20 standalone components, Angular Material dark theme, Reactive Forms, `ng serve` dev server
-- **Database**: H2 file DB at `backend/data/evemarket` — persists between restarts
+- **Database**: PostgreSQL (local) — `spring.datasource.*` in `application.properties`. Tests use H2 in-memory via `@DataJpaTest` / `@WebMvcTest`.
 - **ESI API**: `https://esi.evetech.net/latest` — all public endpoints except character/corp orders which require Bearer tokens
 
 ## Starting the App
@@ -34,13 +36,22 @@ Registered at https://developers.eveonline.com/ with scopes:
 
 ## Key Architecture Decisions
 
-### Scanning
+### Market Order Scanning
 - `@Scheduled(fixedDelay=300000)` with 10s initial delay
 - `AtomicBoolean` guard prevents concurrent scans
 - All 4 regions scanned sequentially; type names and system names batch-resolved via `POST /universe/names/` (1000 IDs per call) **before** any DB save
 - Orders saved in batches of 5000 to avoid huge transactions
 - Category enrichment runs on a virtual thread **after** each scan (non-blocking)
 - Old orders purged after 24h
+
+### Capital Contract Scanning
+- `ContractScannerService` — separate `@Scheduled` scan every 30 min (60s initial delay)
+- Regions configurable via `app.contracts.region-ids` (defaults: Derelik=10000001, Domain=10000043)
+- Capital ship group IDs configurable via `app.contracts.capital-group-ids` (Titan=30, Dreadnought=485, Carrier=547, Supercarrier=659, Capital Industrial=883, Force Auxiliary=1538, Jump Freighter=902)
+- Scan flow: fetch contracts (item_exchange only) → skip expired + already-indexed → fetch items in parallel (concurrency 10) → filter for capital group IDs → compute effective price → save
+- **Effective price**: `effectiveCapitalPrice = contractPrice − Σ(nonCapItem.qty × universeAveragePrice)`. Contracts with unknown-priced extras are flagged `priceIncomplete=true`.
+- `ContractPersistenceService` saves contracts + items atomically in one `@Transactional` call
+- Expired contracts pruned after each scan
 
 ### Arbitrage
 - Native SQL `GROUP BY (type_id, region_id)` returns min sell price per item per region
@@ -63,16 +74,20 @@ Registered at https://developers.eveonline.com/ with scopes:
 ```
 com.evemarket.backend
 ├── config/       EveSsoConfig, WebClientConfig, CorsConfig
-├── controller/   MarketController, AuthController
-├── dto/          EsiMarketOrderDto, MarketOfferDto, ArbitrageOpportunityDto
-├── model/        MarketOrder, ItemType
-├── repository/   MarketOrderRepository, ItemTypeRepository
+├── controller/   MarketController, AuthController, ContractController
+├── dto/          EsiMarketOrderDto, MarketOfferDto, ArbitrageOpportunityDto,
+│                 EsiContractDto, EsiContractItemDto,
+│                 CapitalContractDto, CapitalContractItemDto
+├── model/        MarketOrder, ItemType, Contract, ContractItem
+├── repository/   MarketOrderRepository, ItemTypeRepository,
+│                 ContractRepository, ContractItemRepository
 └── service/      EsiService, MarketScannerService, ArbitrageService,
+                  ContractScannerService, ContractPersistenceService,
                   EveSsoService, CharacterSession
 ```
 
 ## Common Issues
-- **H2 file lock on restart**: `taskkill //F //IM java.exe` (Windows)
+- **Postgres not running**: `pg_ctl start` or start from pgAdmin — backend won't start without it
 - **Backend "failed" task notification**: usually the previously-killed process — verify with `curl http://localhost:8080/api/auth/status`
 - **Corp orders 403**: character needs Accountant or Trader role in-game — personal orders still work
 - **New SSO scope**: after adding a scope to the dev app, user must logout + re-login to get a token with the new scope
@@ -91,4 +106,15 @@ GET  /api/auth/login          redirect to EVE SSO
 GET  /api/auth/callback       OAuth2 callback (EVE redirects here)
 POST /api/auth/logout         clear character session
 GET  /api/auth/status         { loggedIn, characterName }
+
+GET  /api/contracts/capitals  paginated capital contracts (filters: regionId, capitalTypeId, maxPrice, priceCompleteOnly)
+POST /api/contracts/scan      trigger immediate contract scan
 ```
+
+## Tests
+Run with `./mvnw test`. Three test classes cover the contract feature:
+- `ContractScannerServiceTest` — 11 unit tests (Mockito): price calculation, capital detection, skip-expired, skip-existing, mixed capitals, negative effective price
+- `ContractRepositoryTest` — 7 `@DataJpaTest` tests: active-contract query filters, expiry pruning
+- `ContractControllerTest` — 5 `@WebMvcTest` tests: REST response shape, item list, region name mapping
+
+**Note**: Spring Boot 3.x serializes `Page` metadata under `$.page.totalElements` (not `$.totalElements`).
