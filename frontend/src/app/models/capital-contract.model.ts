@@ -42,10 +42,13 @@ export interface CapitalContractFilter {
   sortDir?: string;
 }
 
+// Spring Boot 3.x nests pagination metadata under a "page" sub-object
 export interface CapitalContractPage {
   content: CapitalContract[];
-  totalElements: number;
-  totalPages: number;
-  number: number;
-  size: number;
+  page: {
+    totalElements: number;
+    totalPages: number;
+    number: number;
+    size: number;
+  };
 }

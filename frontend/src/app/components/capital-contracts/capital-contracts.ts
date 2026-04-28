@@ -71,7 +71,7 @@ const GROUP_COLORS: Record<string, string> = {
         </mat-checkbox>
       </div>
 
-      <button mat-flat-button color="primary" (click)="load()" class="apply-btn">
+      <button mat-flat-button color="primary" (click)="applyFilters()" class="apply-btn">
         <mat-icon>search</mat-icon> Apply
       </button>
 
@@ -328,7 +328,17 @@ export class CapitalContractsComponent implements OnInit {
     priceCompleteOnly: [false],
   });
 
-  ngOnInit() { this.load(); }
+  ngOnInit() {
+    this.load();
+    // Auto-apply when either dropdown changes — no typing involved so no debounce needed
+    this.filterForm.controls.regionId.valueChanges.subscribe(() => this.applyFilters());
+    this.filterForm.controls.shipClass.valueChanges.subscribe(() => this.applyFilters());
+  }
+
+  applyFilters() {
+    this.currentPage = 0;
+    this.load();
+  }
 
   load() {
     this.loading = true;
@@ -336,20 +346,20 @@ export class CapitalContractsComponent implements OnInit {
     const v = this.filterForm.value;
 
     this.contractService.getCapitalContracts({
-      regionId:         v.regionId ?? null,
-      maxPrice:         v.maxPriceBillions != null ? v.maxPriceBillions * 1_000_000_000 : null,
+      regionId:          v.regionId ?? null,
+      maxPrice:          v.maxPriceBillions != null ? v.maxPriceBillions * 1_000_000_000 : null,
       priceCompleteOnly: v.priceCompleteOnly ?? false,
-      page:             this.currentPage,
-      size:             this.pageSize,
-      sortBy:           'effectivePricePerUnit',
-      sortDir:          'asc',
+      page:              this.currentPage,
+      size:              this.pageSize,
+      sortBy:            'effectivePricePerUnit',
+      sortDir:           'asc',
     }).subscribe({
       next: (page) => {
         let rows = page.content;
         const cls = v.shipClass;
         if (cls) rows = rows.filter(r => r.capitalGroupName === cls);
         this.dataSource.data = rows;
-        this.totalElements = page.totalElements;
+        this.totalElements = page.page?.totalElements ?? 0;
         this.loading = false;
       },
       error: () => { this.loading = false; }
