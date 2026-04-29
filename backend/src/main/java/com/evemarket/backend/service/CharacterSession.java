@@ -1,6 +1,7 @@
 package com.evemarket.backend.service;
 
 import org.springframework.stereotype.Component;
+import java.util.Set;
 
 /**
  * Singleton in-memory store for the currently authenticated EVE character.
@@ -9,12 +10,13 @@ import org.springframework.stereotype.Component;
 @Component
 public class CharacterSession {
 
-    private volatile String accessToken;
-    private volatile String refreshToken;
-    private volatile long   expiresAt;      // Unix epoch seconds
-    private volatile int    characterId;
-    private volatile String characterName;
-    private volatile int    corporationId;
+    private volatile String      accessToken;
+    private volatile String      refreshToken;
+    private volatile long        expiresAt;      // Unix epoch seconds
+    private volatile int         characterId;
+    private volatile String      characterName;
+    private volatile int         corporationId;
+    private volatile Set<String> grantedScopes = new java.util.HashSet<>();
 
     public boolean isLoggedIn() {
         return accessToken != null && !accessToken.isBlank();
@@ -32,6 +34,7 @@ public class CharacterSession {
         characterId   = 0;
         characterName = null;
         corporationId = 0;
+        grantedScopes = new java.util.HashSet<>();
     }
 
     // ── Getters & Setters ────────────────────────────────────────────────────
@@ -53,4 +56,11 @@ public class CharacterSession {
 
     public int getCorporationId()    { return corporationId; }
     public void setCorporationId(int id) { this.corporationId = id; }
+
+    public Set<String> getGrantedScopes() { return grantedScopes; }
+    public void setGrantedScopes(Set<String> scopes) { this.grantedScopes = scopes; }
+
+    public boolean hasScope(String scope) {
+        return grantedScopes != null && grantedScopes.contains(scope);
+    }
 }

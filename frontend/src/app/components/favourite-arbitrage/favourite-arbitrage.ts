@@ -196,7 +196,8 @@ export class FavouriteArbitrageComponent implements OnInit {
     if (sort) {
       this.dataSource.sort = sort;
       this.dataSource.sortingDataAccessor = (row, id) => (row as any)[id] ?? 0;
-      sort.sort({ id: 'buyRegionName', start: 'desc', disableClear: false });
+      // Defer initial sort to avoid ExpressionChangedAfterItHasBeenCheckedError
+      Promise.resolve().then(() => sort.sort({ id: 'buyRegionName', start: 'desc', disableClear: false }));
     }
   }
 

@@ -1,7 +1,8 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder } from '@angular/forms';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
+import { MatSortModule, MatSort, Sort } from '@angular/material/sort';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatInputModule } from '@angular/material/input';
@@ -36,7 +37,7 @@ const GROUP_COLORS: Record<string, string> = {
   standalone: true,
   imports: [
     CommonModule, FormsModule, ReactiveFormsModule,
-    MatTableModule, MatFormFieldModule, MatSelectModule, MatInputModule,
+    MatTableModule, MatSortModule, MatFormFieldModule, MatSelectModule, MatInputModule,
     MatProgressSpinnerModule, MatIconModule, MatTooltipModule,
     MatButtonModule, MatCheckboxModule, MatExpansionModule,
     MatChipsModule, MatPaginatorModule,
@@ -91,7 +92,7 @@ const GROUP_COLORS: Record<string, string> = {
         <mat-spinner diameter="48"></mat-spinner>
       </div>
 
-      <table mat-table [dataSource]="dataSource" class="contracts-table">
+      <table mat-table [dataSource]="dataSource" multiTemplateDataRows matSort (matSortChange)="onSortChange($event)" class="contracts-table">
 
         <ng-container matColumnDef="shipClass">
           <th mat-header-cell *matHeaderCellDef>Class</th>
@@ -120,6 +121,13 @@ const GROUP_COLORS: Record<string, string> = {
           </td>
         </ng-container>
 
+        <ng-container matColumnDef="location">
+          <th mat-header-cell *matHeaderCellDef>Location</th>
+          <td mat-cell *matCellDef="let row" class="location-cell muted">
+            {{ row.startLocationName || '—' }}
+          </td>
+        </ng-container>
+
         <ng-container matColumnDef="price">
           <th mat-header-cell *matHeaderCellDef>Contract Price</th>
           <td mat-cell *matCellDef="let row" class="num">{{ formatIsk(row.price) }}</td>
@@ -133,7 +141,7 @@ const GROUP_COLORS: Record<string, string> = {
         </ng-container>
 
         <ng-container matColumnDef="effectivePricePerUnit">
-          <th mat-header-cell *matHeaderCellDef>Effective Cap Price</th>
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="effectivePricePerUnit">Effective Cap Price</th>
           <td mat-cell *matCellDef="let row">
             <span class="eff-price" [class.negative]="row.effectivePricePerUnit < 0">
               {{ formatIsk(row.effectivePricePerUnit) }}
@@ -151,7 +159,8 @@ const GROUP_COLORS: Record<string, string> = {
 
         <ng-container matColumnDef="title">
           <th mat-header-cell *matHeaderCellDef>Title</th>
-          <td mat-cell *matCellDef="let row" class="muted title-cell">
+          <td mat-cell *matCellDef="let row" class="muted title-cell"
+              [matTooltip]="row.title || ''" [matTooltipDisabled]="!row.title">
             {{ row.title || '—' }}
           </td>
         </ng-container>
@@ -264,6 +273,7 @@ const GROUP_COLORS: Record<string, string> = {
     .num  { font-variant-numeric: tabular-nums; }
     .muted { color: rgba(255,255,255,0.5); }
     .title-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .location-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
 
     .eff-price { font-weight: 700; color: #69f0ae; }
     .eff-price.negative { color: #ff5252; }
@@ -303,11 +313,13 @@ export class CapitalContractsComponent implements OnInit {
   private contractService = inject(ContractService);
   private fb = inject(FormBuilder);
 
+  @ViewChild(MatSort) matSort!: MatSort;
+
   regions = REGIONS;
   shipClasses = Object.keys(GROUP_COLORS);
 
   displayedColumns = [
-    'shipClass', 'capitalTypeName', 'region',
+    'shipClass', 'capitalTypeName', 'region', 'location',
     'price', 'nonCapItemValue', 'effectivePricePerUnit',
     'title', 'dateExpired', 'expand'
   ];
@@ -320,6 +332,8 @@ export class CapitalContractsComponent implements OnInit {
   currentPage = 0;
 
   expandedRow: CapitalContract | null = null;
+  sortBy  = 'effectivePricePerUnit';
+  sortDir = 'asc';
 
   filterForm = this.fb.group({
     regionId:          [null as number | null],
@@ -351,8 +365,8 @@ export class CapitalContractsComponent implements OnInit {
       priceCompleteOnly: v.priceCompleteOnly ?? false,
       page:              this.currentPage,
       size:              this.pageSize,
-      sortBy:            'effectivePricePerUnit',
-      sortDir:           'asc',
+      sortBy:            this.sortBy,
+      sortDir:           this.sortDir,
     }).subscribe({
       next: (page) => {
         let rows = page.content;
@@ -369,6 +383,13 @@ export class CapitalContractsComponent implements OnInit {
   onPage(e: PageEvent) {
     this.currentPage = e.pageIndex;
     this.pageSize    = e.pageSize;
+    this.load();
+  }
+
+  onSortChange(sort: Sort) {
+    this.sortBy  = sort.active || 'effectivePricePerUnit';
+    this.sortDir = sort.direction || 'asc';
+    this.currentPage = 0;
     this.load();
   }
 

@@ -15,6 +15,8 @@ public class CapitalContractDto {
     private Integer regionId;
     private String regionName;
     private Long issuerId;
+    private Long startLocationId;
+    private String startLocationName;
     private BigDecimal price;
     private Instant dateIssued;
     private Instant dateExpired;

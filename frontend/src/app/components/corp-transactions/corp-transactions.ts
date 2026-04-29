@@ -1,4 +1,4 @@
-import { Component, OnInit, AfterViewInit, ViewChild, inject } from '@angular/core';
+import { Component, OnInit, AfterViewInit, ViewChild, ChangeDetectorRef, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatTableModule, MatTableDataSource } from '@angular/material/table';
 import { MatSortModule, MatSort } from '@angular/material/sort';
@@ -45,6 +45,16 @@ import { CorpTransaction } from '../../models/market-offer.model';
     <div class="empty-state" *ngIf="!isLoggedIn">
       <mat-icon>lock_outline</mat-icon>
       <p>Login with your EVE Online account to see corporation transactions.</p>
+    </div>
+
+    <!-- Missing scope warning -->
+    <div class="scope-warning" *ngIf="isLoggedIn && !hasCorpWalletScope && !loading">
+      <mat-icon>warning_amber</mat-icon>
+      <div>
+        <strong>Corp wallet access not granted.</strong>
+        <p>Your login session is missing <code>esi-wallet.read_corporation_wallets.v1</code>.
+        Add this scope to your EVE developer app, then <strong>log out and log back in</strong>.</p>
+      </div>
     </div>
 
     <!-- Loading -->
@@ -201,24 +211,40 @@ import { CorpTransaction } from '../../models/market-offer.model';
 
     .location { color: rgba(255,255,255,0.6); font-size: 0.85rem; }
     .no-data { text-align: center; padding: 32px; color: rgba(255,255,255,0.4); }
+
+    .scope-warning {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 16px 20px; border-radius: 8px; margin-bottom: 16px;
+      background: rgba(255,167,38,0.1); border: 1px solid rgba(255,167,38,0.3);
+      color: rgba(255,255,255,0.8);
+      mat-icon { color: #ffa726; margin-top: 2px; flex-shrink: 0; }
+      strong { color: #ffa726; }
+      p { margin: 6px 0 0; font-size: 0.88rem; color: rgba(255,255,255,0.6); }
+      code { background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 3px; font-size: 0.82rem; }
+    }
   `]
 })
 export class CorpTransactionsComponent implements OnInit, AfterViewInit {
   private marketService = inject(MarketService);
   private authService   = inject(AuthService);
+  private cdr           = inject(ChangeDetectorRef);
 
   @ViewChild(MatSort) sort!: MatSort;
 
   displayedColumns = ['date', 'type', 'typeName', 'quantity', 'unitPrice', 'totalValue', 'locationName'];
 
-  dataSource    = new MatTableDataSource<CorpTransaction>([]);
-  isLoggedIn = false;
-  loading    = false;
+  dataSource         = new MatTableDataSource<CorpTransaction>([]);
+  isLoggedIn         = false;
+  hasCorpWalletScope = false;
+  loading            = false;
 
   ngOnInit() {
-    this.authService.getStatus().subscribe(s => {
-      this.isLoggedIn = s.loggedIn;
-      if (s.loggedIn) this.load();
+    this.authService.status$.subscribe(s => {
+      const wasLoggedIn = this.isLoggedIn;
+      this.isLoggedIn         = s.loggedIn;
+      this.hasCorpWalletScope = s.hasCorpWalletScope ?? false;
+      this.cdr.markForCheck();
+      if (s.loggedIn && !wasLoggedIn) this.load();
     });
   }
 
@@ -232,8 +258,8 @@ export class CorpTransactionsComponent implements OnInit, AfterViewInit {
   load() {
     this.loading = true;
     this.marketService.getCorpTransactions().subscribe({
-      next: (data) => { this.dataSource.data = data; this.loading = false; },
-      error: ()     => { this.loading = false; }
+      next: (data) => { this.dataSource.data = data; this.loading = false; this.cdr.markForCheck(); },
+      error: ()     => { this.loading = false; this.cdr.markForCheck(); }
     });
   }
 

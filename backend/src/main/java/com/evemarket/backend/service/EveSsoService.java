@@ -272,20 +272,24 @@ public class EveSsoService {
         if (corpId <= 0) return Collections.emptyList();
 
         List<CorpTransactionEsiDto> all = new ArrayList<>();
-        try {
-            List<CorpTransactionEsiDto> divTx = webClient.get()
-                    .uri(ESI_BASE + "/corporations/{corpId}/wallets/1/transactions/", corpId)
-                    .header("Authorization", "Bearer " + token)
-                    .retrieve()
-                    .bodyToFlux(CorpTransactionEsiDto.class)
-                    .collectList()
-                    .block();
-            if (divTx != null) {
-                divTx.forEach(t -> t.setDivision(1));
-                all.addAll(divTx);
+        for (int div = 1; div <= 7; div++) {
+            final int division = div;
+            try {
+                List<CorpTransactionEsiDto> divTx = webClient.get()
+                        .uri(ESI_BASE + "/corporations/{corpId}/wallets/{div}/transactions/", corpId, division)
+                        .header("Authorization", "Bearer " + token)
+                        .retrieve()
+                        .bodyToFlux(CorpTransactionEsiDto.class)
+                        .collectList()
+                        .block();
+                if (divTx != null) {
+                    divTx.forEach(t -> t.setDivision(division));
+                    all.addAll(divTx);
+                }
+            } catch (Exception e) {
+                log.warn("Corp wallet division {} transactions failed: {}", division, e.getMessage());
+                break; // if div 1 fails (403/missing scope) no point trying the rest
             }
-        } catch (Exception e) {
-            log.warn("Could not fetch corp master wallet transactions: {}", e.getMessage());
         }
 
         // Resolve type names in batch from local DB
@@ -374,10 +378,21 @@ public class EveSsoService {
         // sub = "CHARACTER:EVE:12345678"
         String sub  = extractJsonString(payload, "sub");
         String name = extractJsonString(payload, "name");
+        // scp contains space-separated granted scopes (may be a JSON string or array)
+        Set<String> scopes = extractScopes(payload);
 
         int charId = Integer.parseInt(sub.substring(sub.lastIndexOf(':') + 1));
         characterSession.setCharacterId(charId);
         characterSession.setCharacterName(name);
+        characterSession.setGrantedScopes(scopes);
+
+        log.info("Token scopes granted: {}", scopes);
+        Set<String> requested = Set.of(SSO_SCOPE.split(" "));
+        Set<String> missing   = new java.util.HashSet<>(requested);
+        missing.removeAll(scopes);
+        if (!missing.isEmpty()) {
+            log.warn("Token is MISSING scopes: {} — re-register the EVE app and re-login", missing);
+        }
     }
 
     /** Add Base64 padding if needed. */
@@ -387,6 +402,38 @@ public class EveSsoService {
             case 3  -> s + "=";
             default -> s;
         };
+    }
+
+    /**
+     * Extract the "scp" claim from a JWT payload JSON string.
+     * EVE SSO encodes it as a space-separated string when a single scope is granted,
+     * or as a JSON array when multiple scopes are granted.
+     */
+    private static Set<String> extractScopes(String json) {
+        String search = "\"scp\":";
+        int idx = json.indexOf(search);
+        if (idx < 0) return Collections.emptySet();
+        int start = idx + search.length();
+        // skip whitespace
+        while (start < json.length() && json.charAt(start) == ' ') start++;
+        Set<String> result = new java.util.HashSet<>();
+        if (json.charAt(start) == '[') {
+            // JSON array: ["scope1","scope2"]
+            int end = json.indexOf(']', start);
+            String arr = json.substring(start + 1, end);
+            for (String s : arr.split(",")) {
+                String scope = s.trim().replace("\"", "");
+                if (!scope.isEmpty()) result.add(scope);
+            }
+        } else if (json.charAt(start) == '"') {
+            // Space-separated string: "scope1 scope2"
+            int end = json.indexOf('"', start + 1);
+            String scpValue = json.substring(start + 1, end);
+            for (String s : scpValue.split(" ")) {
+                if (!s.isEmpty()) result.add(s.trim());
+            }
+        }
+        return result;
     }
 
     /** Minimal JSON string extractor — avoids pulling in a full JSON library for two fields. */

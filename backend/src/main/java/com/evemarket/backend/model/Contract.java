@@ -33,6 +33,9 @@ public class Contract {
     @Column(name = "start_location_id")
     private Long startLocationId;
 
+    @Column(name = "start_location_name")
+    private String startLocationName;
+
     @Column(precision = 20, scale = 2)
     private BigDecimal price;
 

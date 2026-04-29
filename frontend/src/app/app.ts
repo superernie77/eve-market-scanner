@@ -51,7 +51,7 @@ import { AuthService } from './services/auth.service';
     <main class="main-content">
       <div class="content-grid">
         <div class="table-panel">
-          <mat-tab-group animationDuration="200ms">
+          <mat-tab-group animationDuration="200ms" [preserveContent]="true">
             <mat-tab label="All Orders">
               <div class="tab-content">
                 <app-market-table></app-market-table>
@@ -179,7 +179,9 @@ export class App implements OnInit {
   characterName = '';
 
   ngOnInit() {
-    this.authService.getStatus().subscribe(s => {
+    // Single HTTP call — result is broadcast to all components via AuthService.status$
+    this.authService.refresh().subscribe();
+    this.authService.status$.subscribe(s => {
       this.isLoggedIn    = s.loggedIn;
       this.characterName = s.characterName ?? '';
     });

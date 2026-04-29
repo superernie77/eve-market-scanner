@@ -87,11 +87,12 @@ public class AuthController {
      */
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> status() {
-        return ResponseEntity.ok(Map.of(
-                "loggedIn",       characterSession.isLoggedIn(),
-                "characterName",  characterSession.isLoggedIn()
-                                         ? characterSession.getCharacterName()
-                                         : ""
-        ));
+        boolean loggedIn = characterSession.isLoggedIn();
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("loggedIn",           loggedIn);
+        body.put("characterName",      loggedIn ? characterSession.getCharacterName() : "");
+        body.put("hasWalletScope",     loggedIn && characterSession.hasScope("esi-wallet.read_character_wallet.v1"));
+        body.put("hasCorpWalletScope", loggedIn && characterSession.hasScope("esi-wallet.read_corporation_wallets.v1"));
+        return ResponseEntity.ok(body);
     }
 }

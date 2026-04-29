@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, Output, EventEmitter } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef, inject, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatTableModule } from '@angular/material/table';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -207,6 +207,7 @@ import { MyOrder } from '../../models/market-offer.model';
 export class MyBuyOrdersComponent implements OnInit {
   private marketService = inject(MarketService);
   private authService   = inject(AuthService);
+  private cdr           = inject(ChangeDetectorRef);
 
   displayedColumns = ['source', 'typeName', 'regionName', 'price', 'range', 'volume', 'totalBid', 'issued', 'expires'];
 
@@ -217,9 +218,11 @@ export class MyBuyOrdersComponent implements OnInit {
   loading    = false;
 
   ngOnInit() {
-    this.authService.getStatus().subscribe(s => {
+    this.authService.status$.subscribe(s => {
+      const wasLoggedIn = this.isLoggedIn;
       this.isLoggedIn = s.loggedIn;
-      if (s.loggedIn) this.load();
+      this.cdr.markForCheck();
+      if (s.loggedIn && !wasLoggedIn) this.load();
     });
   }
 
@@ -231,8 +234,9 @@ export class MyBuyOrdersComponent implements OnInit {
         this.loading = false;
         const totalValue = data.reduce((sum, o) => sum + o.price * o.volumeRemain, 0);
         this.statsChange.emit({ count: data.length, totalValue });
+        this.cdr.markForCheck();
       },
-      error: ()     => { this.loading = false; }
+      error: ()     => { this.loading = false; this.cdr.markForCheck(); }
     });
   }
 

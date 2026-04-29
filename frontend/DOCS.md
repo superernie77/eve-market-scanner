@@ -1,7 +1,7 @@
 # Frontend Documentation
 
 ## Overview
-Angular 20 standalone-component SPA. Displays EVE Online market data from the Spring Boot backend. Features a persistent toolbar with centralised EVE SSO login, and five tabs: All Orders, Arbitrage, Fav Arbitrage, My Orders / Buy Orders, Corp Transactions, and Wallet.
+Angular 20 standalone-component SPA. Displays EVE Online market data from the Spring Boot backend. Features a persistent toolbar with centralised EVE SSO login, and six tabs: All Orders, Arbitrage, Fav Arbitrage, Capital Contracts, My Orders / Buy Orders, Corp Transactions, and Wallet.
 
 ---
 
@@ -24,17 +24,20 @@ src/app/
 ├── app.config.ts                   Angular providers (HttpClient, animations)
 │
 ├── models/
-│   └── market-offer.model.ts       TypeScript interfaces for all API responses
+│   ├── market-offer.model.ts       TypeScript interfaces for market/arbitrage API responses
+│   └── capital-contract.model.ts   TypeScript interfaces for capital contract API responses
 │
 ├── services/
 │   ├── market.service.ts           HTTP client for /api/market/* endpoints
-│   ├── auth.service.ts             HTTP client for /api/auth/* + login redirect
+│   ├── auth.service.ts             HTTP client for /api/auth/* + BehaviorSubject auth state
+│   ├── contract.service.ts         HTTP client for /api/contracts/* endpoints
 │   └── favourites.service.ts       BehaviorSubject-backed favourites state + HTTP
 │
 └── components/
     ├── market-table/               All Orders tab
     ├── arbitrage/                  Arbitrage tab
     ├── favourite-arbitrage/        Fav Arbitrage tab
+    ├── capital-contracts/          Capital Contracts tab
     ├── my-orders/                  My Sell Orders tab
     ├── my-buy-orders/              My Buy Orders tab
     ├── corp-transactions/          Corp Transactions tab
@@ -47,6 +50,7 @@ src/app/
 
 ## Models (`models/market-offer.model.ts`)
 
+**`market-offer.model.ts`**
 ```typescript
 MarketOffer           // Single market order
 Page<T>               // Spring Data page: { content, page: { totalElements, ... } }
@@ -55,6 +59,14 @@ ArbitrageOpportunity  // Cross-region price gap result
 ArbitrageFilter       // Filter params for the arbitrage endpoint
 Favourite             // { typeId, typeName }
 MyOrder               // Active sell/buy order for logged-in character
+```
+
+**`capital-contract.model.ts`**
+```typescript
+CapitalContract       // Full contract record incl. effective price fields + location
+CapitalContractItem   // Single item within a contract
+CapitalContractFilter // Filter + pagination params for /api/contracts/capitals
+CapitalContractPage   // Spring Data page wrapper for CapitalContract
 ```
 
 ---
@@ -183,6 +195,38 @@ Shows arbitrage opportunities only for starred items. Already-listed rows are hi
 - Default sort: **Buy In descending**
 - Opportunity counter shows only visible (non-hidden) rows
 - Passes `typeIds` to backend so the limit/ranking problem doesn't affect results
+
+---
+
+### `CapitalContractsComponent` — Capital Contracts tab
+
+Paginated, server-side sorted table of public capital ship contracts from configured low-sec regions.
+
+**Filters (applied on "Apply" click; dropdowns apply immediately):**
+| Control | Description |
+|---------|-------------|
+| Region | Derelik or Domain (or both) |
+| Ship Class | Filter by capital group (Carrier, Dreadnought, etc.) |
+| Max Price (B ISK) | Upper bound on contract asking price |
+| Full pricing only | Hide contracts where extras had no market price data |
+
+**Columns:**
+| Column | Description |
+|--------|-------------|
+| Class | Colour-coded ship class badge (Titan, Carrier, etc.) |
+| Ship | Primary capital ship name; ×N badge for multiple; "mixed" if multiple types |
+| Region | Derelik / Domain badge |
+| Location | NPC station name resolved via `/universe/stations/{id}/` |
+| Contract Price | Full asking price |
+| Extras Value | ESI average value of non-capital items in the contract |
+| Effective Cap Price | `Contract Price − Extras Value` (per unit if qty > 1); ⚠ icon if incomplete |
+| Title | Truncated seller note; hover for full text via tooltip |
+| Expires | Contract expiry date |
+| Expand | Expand row to see full item list with estimated values |
+
+**Effective Cap Price** is sortable (default: ascending). Click the column header to toggle sort direction.
+
+**Scan Now** button triggers an immediate contract scan; **Apply** re-fetches with current filter state.
 
 ---
 

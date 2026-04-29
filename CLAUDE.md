@@ -33,6 +33,8 @@ eve.sso.redirect-uri=http://localhost:8080/api/auth/callback
 Registered at https://developers.eveonline.com/ with scopes:
 - `esi-markets.read_character_orders.v1`
 - `esi-markets.read_corporation_orders.v1`
+- `esi-wallet.read_character_wallet.v1`
+- `esi-wallet.read_corporation_wallets.v1`
 
 ## Key Architecture Decisions
 
@@ -105,7 +107,7 @@ POST /api/market/scan         trigger immediate scan
 GET  /api/auth/login          redirect to EVE SSO
 GET  /api/auth/callback       OAuth2 callback (EVE redirects here)
 POST /api/auth/logout         clear character session
-GET  /api/auth/status         { loggedIn, characterName }
+GET  /api/auth/status         { loggedIn, characterName, hasWalletScope, hasCorpWalletScope }
 
 GET  /api/contracts/capitals  paginated capital contracts (filters: regionId, capitalTypeId, maxPrice, priceCompleteOnly)
 POST /api/contracts/scan      trigger immediate contract scan

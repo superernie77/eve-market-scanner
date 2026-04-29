@@ -13,6 +13,7 @@ A local dev tool that scans EVE Online market orders across 5 major trade hub re
 - **All Orders tab** — browse all market orders across all regions (or filter by region), sortable by name, price, or discount; with category, price range, and good-deal filters
 - **Corp order support** — fetches corporation sell orders if your character has the Accountant or Trader role
 - **Centralised auth** — login/logout lives in the toolbar; all tabs share the same session
+- **Capital Contracts tab** — scans public item-exchange contracts in configurable low-sec regions for capital ships; shows ship class, type, region, station location, contract price, extras value, and effective capital price (contract price minus non-capital extras)
 
 ## Tech Stack
 
@@ -90,6 +91,10 @@ GET  /api/auth/login          Redirect to EVE SSO
 GET  /api/auth/callback       OAuth2 callback
 POST /api/auth/logout         Clear session
 GET  /api/auth/status         { loggedIn, characterName }
+
+GET  /api/contracts/capitals  Paginated capital contracts (filters: regionId, capitalTypeId, maxPrice, priceCompleteOnly)
+POST /api/contracts/scan      Trigger an immediate contract scan
+POST /api/contracts/reset     Clear all indexed contracts (forces full re-index on next scan)
 ```
 
 ## Common Issues

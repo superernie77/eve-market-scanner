@@ -71,12 +71,22 @@ public class ContractController {
         return ResponseEntity.accepted().body(Map.of("status", "contract scan triggered"));
     }
 
+    @PostMapping("/reset")
+    @org.springframework.transaction.annotation.Transactional
+    public ResponseEntity<Map<String, String>> resetContracts() {
+        contractItemRepository.deleteAll();
+        contractRepository.deleteAll();
+        return ResponseEntity.ok(Map.of("status", "contracts cleared — trigger a scan to re-index"));
+    }
+
     private CapitalContractDto toDto(Contract c, List<ContractItem> items) {
         CapitalContractDto dto = new CapitalContractDto();
         dto.setContractId(c.getContractId());
         dto.setRegionId(c.getRegionId());
         dto.setRegionName(REGION_NAMES.getOrDefault(c.getRegionId(), "Region " + c.getRegionId()));
         dto.setIssuerId(c.getIssuerId());
+        dto.setStartLocationId(c.getStartLocationId());
+        dto.setStartLocationName(c.getStartLocationName());
         dto.setPrice(c.getPrice());
         dto.setDateIssued(c.getDateIssued());
         dto.setDateExpired(c.getDateExpired());

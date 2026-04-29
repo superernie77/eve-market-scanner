@@ -173,6 +173,45 @@ public class EsiService {
         return result;
     }
 
+    /**
+     * Resolves contract start-location IDs to human-readable names.
+     * NPC stations (60_000_000–67_999_999) → GET /universe/stations/{id}/
+     * Everything else (player structures, etc.) → falls back to "Unknown #id"
+     */
+    public Map<Long, String> resolveLocationNamesBatch(Set<Long> locationIds) {
+        if (locationIds.isEmpty()) return Map.of();
+
+        Map<Long, String> result = new ConcurrentHashMap<>();
+        List<Mono<Void>> tasks = locationIds.stream()
+                .map(id -> {
+                    if (id >= 60_000_000L && id <= 67_999_999L) {
+                        // NPC station
+                        return esiWebClient.get()
+                                .uri("/universe/stations/{id}/", id)
+                                .retrieve()
+                                .bodyToMono(Map.class)
+                                .doOnNext(body -> {
+                                    Object name = body.get("name");
+                                    if (name instanceof String s) result.put(id, s);
+                                })
+                                .onErrorResume(e -> {
+                                    log.warn("Could not resolve station {}: {}", id, e.getMessage());
+                                    result.put(id, "Unknown #" + id);
+                                    return Mono.<Map>empty();
+                                })
+                                .then();
+                    } else {
+                        // Player structure — would need auth; skip for now
+                        result.put(id, "Unknown Structure #" + id);
+                        return Mono.<Void>empty();
+                    }
+                })
+                .toList();
+
+        Flux.merge(tasks).blockLast();
+        return result;
+    }
+
     @SuppressWarnings("unchecked")
     private void fetchSystemNamesFromEsi(List<Long> ids, Map<Long, String> result) {
         List<Map<String, Object>> names = esiWebClient.post()

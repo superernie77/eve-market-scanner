@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef, inject } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -33,6 +33,17 @@ import { WalletData, CorpDivision } from '../../models/market-offer.model';
     <div class="empty-state" *ngIf="!isLoggedIn">
       <mat-icon>lock_outline</mat-icon>
       <p>Login with your EVE Online account to see wallet balances.</p>
+    </div>
+
+    <!-- Logged in but wallet scope missing -->
+    <div class="scope-warning" *ngIf="isLoggedIn && !hasWalletScope && !loading">
+      <mat-icon>warning_amber</mat-icon>
+      <div>
+        <strong>Wallet access not granted.</strong>
+        <p>Your current login session is missing the <code>esi-wallet.*</code> scopes.
+        Make sure these scopes are added to your EVE developer app, then
+        <strong>log out and log back in</strong> to get a token with wallet access.</p>
+      </div>
     </div>
 
     <!-- Loading -->
@@ -179,27 +190,43 @@ import { WalletData, CorpDivision } from '../../models/market-offer.model';
       color: rgba(255,255,255,0.4); font-size: 0.9rem; margin: 0;
       mat-icon { font-size: 18px; height: 18px; width: 18px; }
     }
+
+    .scope-warning {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 16px 20px; border-radius: 8px; margin-bottom: 16px;
+      background: rgba(255,167,38,0.1); border: 1px solid rgba(255,167,38,0.3);
+      color: rgba(255,255,255,0.8);
+      mat-icon { color: #ffa726; margin-top: 2px; flex-shrink: 0; }
+      strong { color: #ffa726; }
+      p { margin: 6px 0 0; font-size: 0.88rem; color: rgba(255,255,255,0.6); }
+      code { background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 3px; font-size: 0.82rem; }
+    }
   `]
 })
 export class WalletComponent implements OnInit {
   private marketService = inject(MarketService);
   private authService   = inject(AuthService);
+  private cdr           = inject(ChangeDetectorRef);
 
-  wallet:    WalletData | null = null;
-  isLoggedIn = false;
-  loading    = false;
+  wallet:          WalletData | null = null;
+  isLoggedIn       = false;
+  hasWalletScope   = false;
+  loading          = false;
 
   ngOnInit() {
-    this.authService.getStatus().subscribe(s => {
-      this.isLoggedIn = s.loggedIn;
-      if (s.loggedIn) this.load();
+    this.authService.status$.subscribe(s => {
+      const wasLoggedIn = this.isLoggedIn;
+      this.isLoggedIn     = s.loggedIn;
+      this.hasWalletScope = s.hasWalletScope ?? false;
+      this.cdr.markForCheck();
+      if (s.loggedIn && !wasLoggedIn) this.load();
     });
   }
 
   load() {
     this.loading = true;
     this.marketService.getWallet().subscribe({
-      next: (data) => { this.wallet = data; this.loading = false; },
+      next: (data) => { this.wallet = data; this.loading = false; this.cdr.markForCheck(); },
       error: ()     => { this.loading = false; }
     });
   }

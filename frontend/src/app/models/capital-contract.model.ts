@@ -11,6 +11,8 @@ export interface CapitalContract {
   regionId: number;
   regionName: string;
   issuerId: number;
+  startLocationId: number;
+  startLocationName: string;
   price: number;
   dateIssued: string;
   dateExpired: string;

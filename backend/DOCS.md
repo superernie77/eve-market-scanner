@@ -1,7 +1,7 @@
 # Backend Documentation
 
 ## Overview
-Spring Boot 3.5 / Java 21 REST API that periodically scans EVE Online market orders via the public ESI API, persists them to PostgreSQL, and exposes endpoints for filtered/sorted order browsing, deal detection, inter-regional arbitrage analysis, and favourite item management. Supports EVE SSO OAuth2 login to fetch the authenticated character's (and their corporation's) active sell orders.
+Spring Boot 3.5 / Java 21 REST API that periodically scans EVE Online market orders and public contracts via the ESI API, persists them to PostgreSQL, and exposes endpoints for filtered/sorted order browsing, deal detection, inter-regional arbitrage analysis, favourite item management, and capital ship contract tracking. Supports EVE SSO OAuth2 login to fetch the authenticated character's (and their corporation's) active sell orders.
 
 ---
 
@@ -31,6 +31,11 @@ Copy `application.properties.example` and fill in secrets.
 | `app.scanner.good-deal-threshold-percent` | `20.0` | Min discount % to flag as a good deal |
 | `app.scanner.retention-hours` | `24` | Hours before old order snapshots are purged |
 | `app.scanner.staleness-threshold-hours` | `1` | Skip ESI fetch if region data is fresher than this |
+| `app.contracts.enabled` | `true` | Enable/disable contract scanning |
+| `app.contracts.region-ids` | `10000001,10000043` | Regions to scan for contracts (Derelik, Domain) |
+| `app.contracts.capital-group-ids` | `30,485,547,659,883,1538,902` | Capital ship group IDs |
+| `app.contracts.poll-interval-ms` | `1800000` | Contract scan interval (30 min) |
+| `app.contracts.initial-delay-ms` | `60000` | Delay before first contract scan |
 | `eve.sso.client-id` | — | EVE developer app Client ID |
 | `eve.sso.client-secret` | — | EVE developer app Secret Key |
 | `eve.sso.redirect-uri` | `http://localhost:8080/api/auth/callback` | OAuth2 callback URL |
@@ -52,7 +57,9 @@ com.evemarket.backend
 ├── model/
 │   ├── MarketOrder.java               JPA entity — one row per sell order per scan
 │   ├── ItemType.java                  JPA entity — cached ESI type metadata
-│   └── Favourite.java                 JPA entity — starred items (typeId PK)
+│   ├── Favourite.java                 JPA entity — starred items (typeId PK)
+│   ├── Contract.java                  JPA entity — indexed capital contract
+│   └── ContractItem.java              JPA entity — items within a contract
 │
 ├── dto/
 │   ├── EsiMarketOrderDto.java         Maps raw ESI JSON (snake_case) to Java
@@ -61,17 +68,25 @@ com.evemarket.backend
 │   ├── FavouriteDto.java              { typeId, typeName }
 │   ├── MyOrderDto.java                Character/corp active sell order
 │   ├── TransactionDto.java            Corporation transaction entry
-│   └── WalletDto.java                 Wallet balance summary
+│   ├── WalletDto.java                 Wallet balance summary
+│   ├── EsiContractDto.java            Raw ESI contract fields
+│   ├── EsiContractItemDto.java        Raw ESI contract item fields
+│   ├── CapitalContractDto.java        API response DTO for capital contracts
+│   └── CapitalContractItemDto.java    API response DTO for contract items
 │
 ├── repository/
 │   ├── MarketOrderRepository.java     Filtered/sorted queries + arbitrage aggregation
 │   ├── ItemTypeRepository.java        Category enrichment queries
-│   └── FavouriteRepository.java       CRUD for starred items
+│   ├── FavouriteRepository.java       CRUD for starred items
+│   ├── ContractRepository.java        Active contract queries + expiry pruning
+│   └── ContractItemRepository.java    Item lookup by contract ID
 │
 ├── service/
-│   ├── EsiService.java                ESI API calls: orders, prices, names, categories
+│   ├── EsiService.java                ESI API calls: orders, prices, names, categories, stations
 │   ├── MarketScannerService.java      @Scheduled scan loop
 │   ├── ArbitrageService.java          Cross-region price gap analysis
+│   ├── ContractScannerService.java    @Scheduled capital contract scan loop
+│   ├── ContractPersistenceService.java Transactional save of contracts + items
 │   ├── CharacterSession.java          Singleton: logged-in character token + info
 │   └── EveSsoService.java             OAuth2 exchange, refresh, char/corp orders
 │
@@ -79,6 +94,7 @@ com.evemarket.backend
     ├── MarketController.java          Orders, arbitrage, stats, scan trigger
     ├── FavouriteController.java       Favourite CRUD
     ├── AuthController.java            Login, callback, logout, status
+    ├── ContractController.java        Capital contracts list, scan trigger, reset
     ├── TransactionController.java     Corp transaction history
     └── WalletController.java          Wallet balance
 ```
@@ -123,6 +139,96 @@ com.evemarket.backend
 |--------|------|-------|
 | `type_id` | INT PK | EVE type ID (natural key) |
 | `type_name` | VARCHAR | Item name (denormalised for display) |
+
+### `contracts`
+| Column | Type | Notes |
+|--------|------|-------|
+| `contract_id` | BIGINT PK | EVE contract ID |
+| `region_id` | INT | EVE region |
+| `issuer_id` | BIGINT | Character who created the contract |
+| `issuer_corporation_id` | BIGINT | Their corporation |
+| `start_location_id` | BIGINT | Station/structure ID |
+| `start_location_name` | VARCHAR | Resolved NPC station name |
+| `price` | DECIMAL | Contract asking price (ISK) |
+| `date_issued` | TIMESTAMP | When the contract was created |
+| `date_expired` | TIMESTAMP | When the contract expires |
+| `title` | VARCHAR | Contract description (optional) |
+| `discovered_at` | TIMESTAMP | When this app indexed it |
+| `capital_type_id` | INT | Primary capital ship type ID |
+| `capital_type_name` | VARCHAR | e.g. "Thanatos" |
+| `capital_group_name` | VARCHAR | e.g. "Carrier" |
+| `capital_quantity` | INT | Total capital ships in contract |
+| `has_mixed_capitals` | BOOLEAN | Multiple different capital types |
+| `non_cap_item_value` | DECIMAL | ESI average value of non-capital extras |
+| `effective_capital_price` | DECIMAL | `price − non_cap_item_value` |
+| `effective_price_per_unit` | DECIMAL | `effective_capital_price / quantity` (null if mixed) |
+| `price_incomplete` | BOOLEAN | Some extras had no ESI price data |
+| `unknown_price_item_count` | INT | Count of unpriced extra items |
+
+### `contract_items`
+| Column | Type | Notes |
+|--------|------|-------|
+| `record_id` | BIGINT PK | ESI record ID |
+| `contract_id` | BIGINT FK | References `contracts.contract_id` |
+| `type_id` | INT | Item type |
+| `type_name` | VARCHAR | Resolved item name |
+| `quantity` | INT | Units |
+| `is_singleton` | BOOLEAN | Assembled/unique item |
+| `group_id` | INT | ESI group ID |
+| `is_capital` | BOOLEAN | Whether this item is a capital ship |
+| `estimated_value` | DECIMAL | `quantity × ESI average price` (null for capitals / unpriced) |
+
+---
+
+## Contract Scan Lifecycle (`ContractScannerService`)
+
+```
+1. AtomicBoolean guard — skip if already scanning
+2. Fetch ESI universe average prices (used for extras valuation)
+3. For each configured region:
+   a. Fetch all item_exchange contracts (GET /markets/{region}/contracts/)
+   b. Filter: not expired, not already indexed
+   c. Bulk-fetch contract items (concurrency 10)
+   d. Batch-resolve type names and group IDs (POST /universe/names/)
+   e. Resolve station names (GET /universe/stations/{id}/ per NPC station)
+   f. For each contract containing at least one capital group item:
+      - Compute nonCapItemValue = Σ(extras qty × ESI avg price)
+      - effectiveCapitalPrice = contractPrice − nonCapItemValue
+      - effectivePricePerUnit = effectiveCapitalPrice / capitalQuantity
+      - Flag priceIncomplete if any extras had no price data
+   g. Save contracts + items atomically (ContractPersistenceService)
+4. Prune contracts with dateExpired < now
+```
+
+**Station name resolution:** NPC station IDs (60,000,000–67,999,999) are resolved via `GET /universe/stations/{id}/`. Player-owned structures fall back to "Unknown Structure #id" (auth required for those).
+
+---
+
+## REST API
+
+---
+
+### `GET /api/contracts/capitals`
+Paginated, filterable, sortable list of active capital contracts.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `regionId` | int | — | Filter by EVE region |
+| `capitalTypeId` | int | — | Filter by primary ship type ID |
+| `maxPrice` | decimal | — | Maximum contract price (ISK) |
+| `priceCompleteOnly` | bool | false | Exclude contracts with unknown-priced extras |
+| `page` | int | 0 | Page number (0-based) |
+| `size` | int | 50 | Page size |
+| `sortBy` | string | `effectivePricePerUnit` | `effectivePricePerUnit`, `effectiveCapitalPrice`, `price`, `nonCapItemValue`, `dateExpired`, `capitalTypeName` |
+| `sortDir` | string | `asc` | `asc` or `desc` |
+
+Returns: Spring Data `Page<CapitalContractDto>`
+
+### `POST /api/contracts/scan`
+Triggers an immediate contract scan on a background thread.
+
+### `POST /api/contracts/reset`
+Deletes all indexed contracts and items. Use when you need to force a full re-index (e.g. after adding new fields to the schema).
 
 ---
 

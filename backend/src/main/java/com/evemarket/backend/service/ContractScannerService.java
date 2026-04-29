@@ -123,6 +123,14 @@ public class ContractScannerService {
         Map<Integer, String> typeNames = esiService.resolveTypeNamesBatch(allTypeIds);
         Map<Integer, Integer> groupIds  = esiService.resolveGroupIdsBatch(allTypeIds);
 
+        // Resolve station/structure names (NPC stations resolve via /universe/names/;
+        // player structures that fail silently fall back to "Unknown Structure #ID")
+        Set<Long> locationIds = newContracts.stream()
+                .map(EsiContractDto::getStartLocationId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> locationNames = esiService.resolveLocationNamesBatch(locationIds);
+
         List<Contract>     contractsToSave = new ArrayList<>();
         List<ContractItem> itemsToSave     = new ArrayList<>();
 
@@ -139,7 +147,7 @@ public class ContractScannerService {
 
             if (!hasCapital) continue;
 
-            Contract contract = buildContract(dto, included, typeNames, groupIds, universePrices, regionId, now);
+            Contract contract = buildContract(dto, included, typeNames, groupIds, universePrices, locationNames, regionId, now);
             contractsToSave.add(contract);
 
             for (EsiContractItemDto item : included) {
@@ -178,6 +186,7 @@ public class ContractScannerService {
                                    Map<Integer, String> typeNames,
                                    Map<Integer, Integer> groupIds,
                                    Map<Integer, BigDecimal> universePrices,
+                                   Map<Long, String> locationNames,
                                    int regionId, Instant now) {
         Contract c = new Contract();
         c.setContractId(dto.getContractId());
@@ -185,6 +194,10 @@ public class ContractScannerService {
         c.setIssuerId(dto.getIssuerId());
         c.setIssuerCorporationId(dto.getIssuerCorporationId());
         c.setStartLocationId(dto.getStartLocationId());
+        if (dto.getStartLocationId() != null) {
+            c.setStartLocationName(locationNames.getOrDefault(
+                    dto.getStartLocationId(), "Unknown #" + dto.getStartLocationId()));
+        }
         c.setPrice(dto.getPrice() != null ? dto.getPrice() : BigDecimal.ZERO);
         c.setDateIssued(dto.getDateIssued());
         c.setDateExpired(dto.getDateExpired());
@@ -241,7 +254,6 @@ public class ContractScannerService {
         return c;
     }
 
-    @Transactional
     public void pruneExpiredContracts() {
         contractRepository.deleteByDateExpiredBefore(Instant.now());
     }
