@@ -197,6 +197,9 @@ const GROUP_COLORS: Record<string, string> = {
                          [class.rig-item]="item.isRig">
                       <span class="item-qty">{{ item.quantity }}×</span>
                       <span class="item-name">{{ item.typeName }}</span>
+                      @if (item.packagedVolume != null) {
+                        <span class="item-vol">{{ formatVolume(item.packagedVolume * item.quantity) }}</span>
+                      }
                       @if (item.estimatedValue != null) {
                         <span class="item-value">≈ {{ formatIsk(item.estimatedValue) }}</span>
                       }
@@ -308,6 +311,7 @@ const GROUP_COLORS: Record<string, string> = {
     .item-row.rig-item { background: rgba(179,136,255,0.12); border-left: 2px solid rgba(179,136,255,0.6); border-radius: 4px; padding: 3px 6px; }
     .item-qty { color: rgba(255,255,255,0.4); min-width: 32px; text-align: right; }
     .item-name { flex: 1; }
+    .item-vol { color: rgba(255,255,255,0.3); font-variant-numeric: tabular-nums; font-size: 0.8rem; min-width: 72px; text-align: right; }
     .item-value { color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums; }
     .item-value.no-price { color: #ff9800; font-size: 0.75rem; }
     .cap-tag {

@@ -207,6 +207,9 @@ const GROUP_COLORS: Record<string, string> = {
                      [class.rig-item]="item.isRig">
                   <span class="item-qty">{{ item.quantity }}×</span>
                   <span class="item-name">{{ item.typeName }}</span>
+                  <span class="item-vol" *ngIf="item.packagedVolume != null">
+                    {{ formatVolume(item.packagedVolume * item.quantity) }}
+                  </span>
                   <span class="item-value" *ngIf="!item.isCapital && item.estimatedValue != null">
                     ≈ {{ formatIsk(item.estimatedValue) }}
                   </span>
@@ -319,6 +322,7 @@ const GROUP_COLORS: Record<string, string> = {
     .item-row.rig-item { background: rgba(179,136,255,0.12); border-left: 2px solid rgba(179,136,255,0.6); border-radius: 4px; padding: 3px 6px; }
     .item-qty { color: rgba(255,255,255,0.4); min-width: 32px; text-align: right; }
     .item-name { flex: 1; }
+    .item-vol { color: rgba(255,255,255,0.3); font-variant-numeric: tabular-nums; font-size: 0.8rem; min-width: 72px; text-align: right; }
     .item-value { color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums; }
     .item-value.no-price { color: #ff9800; font-size: 0.75rem; }
     .cap-tag {
@@ -441,6 +445,13 @@ export class CapitalContractsComponent implements OnInit {
   groupBg(groupName: string): string {
     const color = GROUP_COLORS[groupName] ?? 'rgba(255,255,255,0.7)';
     return color + '22';
+  }
+
+  formatVolume(value: number | null): string {
+    if (value == null) return '—';
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M m³`;
+    if (value >= 1_000)     return `${(value / 1_000).toFixed(1)}k m³`;
+    return `${value.toLocaleString()} m³`;
   }
 
   formatIsk(value: number): string {
