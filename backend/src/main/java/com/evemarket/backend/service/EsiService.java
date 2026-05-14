@@ -270,9 +270,9 @@ public class EsiService {
         // Step 1: fetch group_id for each unenriched type (parallel, max 10)
         Map<Integer, Integer> typeToGroupId = new ConcurrentHashMap<>();
         Flux.fromIterable(unenriched)
-                .flatMap(t -> fetchTypeGroupId(t.getTypeId())
-                        .map(gid -> Map.entry(t.getTypeId(), gid))
-                        .onErrorResume(e -> Mono.empty()), 10)
+                .flatMap(t -> fetchTypeData(t.getTypeId())
+                        .map(td -> Map.entry(t.getTypeId(), td.groupId()))
+                        .<Map.Entry<Integer, Integer>>onErrorResume(e -> Mono.empty()), 10)
                 .toStream()
                 .forEach(e -> typeToGroupId.put(e.getKey(), e.getValue()));
 
@@ -339,13 +339,19 @@ public class EsiService {
         itemTypeRepository.saveAll(types);
     }
 
+    private record TypeData(int groupId, BigDecimal packagedVolume) {}
+
     @SuppressWarnings("unchecked")
-    private Mono<Integer> fetchTypeGroupId(int typeId) {
+    private Mono<TypeData> fetchTypeData(int typeId) {
         return esiWebClient.get()
                 .uri("/universe/types/{typeId}/", typeId)
                 .retrieve()
                 .bodyToMono((Class<Map<String, Object>>) (Class<?>) Map.class)
-                .map(m -> ((Number) m.get("group_id")).intValue());
+                .map(m -> {
+                    int gid = ((Number) m.get("group_id")).intValue();
+                    Number vol = (Number) m.get("packaged_volume");
+                    return new TypeData(gid, vol != null ? new BigDecimal(vol.toString()) : null);
+                });
     }
 
     @SuppressWarnings("unchecked")
@@ -443,35 +449,60 @@ public class EsiService {
         if (typeIds.isEmpty()) return Map.of();
 
         Map<Integer, Integer> result = new HashMap<>();
-        itemTypeRepository.findAllById(typeIds).stream()
+        List<ItemType> cached = itemTypeRepository.findAllById(typeIds);
+        cached.stream()
                 .filter(it -> it.getGroupId() != null)
                 .forEach(it -> result.put(it.getTypeId(), it.getGroupId()));
 
-        Set<Integer> missing = typeIds.stream()
-                .filter(id -> !result.containsKey(id))
+        // Fetch from ESI: types not in cache at all, or in cache but missing packagedVolume
+        Set<Integer> cachedIds = cached.stream().map(ItemType::getTypeId).collect(Collectors.toSet());
+        Set<Integer> needsVolume = cached.stream()
+                .filter(it -> it.getGroupId() != null && it.getPackagedVolume() == null)
+                .map(ItemType::getTypeId)
                 .collect(Collectors.toSet());
+        Set<Integer> missing = new HashSet<>(typeIds);
+        missing.removeAll(result.keySet());
+        missing.addAll(needsVolume);
 
         if (missing.isEmpty()) return result;
 
-        log.debug("Resolving {} missing group IDs from ESI", missing.size());
-        Map<Integer, Integer> fetched = new ConcurrentHashMap<>();
+        log.debug("Resolving {} type(s) from ESI (missing groupId or packagedVolume)", missing.size());
+        Map<Integer, TypeData> fetched = new ConcurrentHashMap<>();
         Flux.fromIterable(missing)
-                .flatMap(id -> fetchTypeGroupId(id)
-                        .map(gid -> Map.entry(id, gid))
+                .flatMap(id -> fetchTypeData(id)
+                        .map(td -> Map.entry(id, td))
                         .onErrorResume(e -> Mono.empty()), 10)
                 .toStream()
                 .forEach(e -> fetched.put(e.getKey(), e.getValue()));
 
-        result.putAll(fetched);
+        fetched.forEach((id, td) -> result.put(id, td.groupId()));
 
         if (!fetched.isEmpty()) {
             List<ItemType> toUpdate = itemTypeRepository.findAllById(fetched.keySet()).stream()
-                    .filter(it -> it.getGroupId() == null)
-                    .peek(it -> it.setGroupId(fetched.get(it.getTypeId())))
+                    .filter(it -> it.getGroupId() == null || it.getPackagedVolume() == null)
+                    .peek(it -> {
+                        TypeData td = fetched.get(it.getTypeId());
+                        if (td != null) {
+                            it.setGroupId(td.groupId());
+                            it.setPackagedVolume(td.packagedVolume());
+                        }
+                    })
                     .toList();
             if (!toUpdate.isEmpty()) itemTypeRepository.saveAll(toUpdate);
         }
 
+        return result;
+    }
+
+    /**
+     * Returns packaged volume (m³) per typeId, read from the ItemType cache.
+     * Call after resolveGroupIdsBatch so the cache is warm.
+     */
+    public Map<Integer, BigDecimal> resolvePackagedVolumesBatch(Set<Integer> typeIds) {
+        if (typeIds.isEmpty()) return Map.of();
+        Map<Integer, BigDecimal> result = new HashMap<>();
+        itemTypeRepository.findAllById(typeIds)
+                .forEach(it -> { if (it.getPackagedVolume() != null) result.put(it.getTypeId(), it.getPackagedVolume()); });
         return result;
     }
 

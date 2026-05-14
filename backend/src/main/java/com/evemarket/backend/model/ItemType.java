@@ -37,6 +37,9 @@ public class ItemType {
     @Column(name = "category_name")
     private String categoryName;
 
+    @Column(name = "packaged_volume", precision = 20, scale = 4)
+    private BigDecimal packagedVolume;
+
     @Column(name = "last_updated")
     private Instant lastUpdated;
 }

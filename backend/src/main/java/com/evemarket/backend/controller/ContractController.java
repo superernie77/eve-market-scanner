@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -154,7 +155,11 @@ public class ContractController {
         if (c.getValueDiffPct() != null) {
             dto.setValueDiffPct(c.getValueDiffPct().doubleValue());
         }
-        dto.setItems(items.stream().map(this::toItemDto).toList());
+        dto.setItems(items.stream()
+                .sorted(Comparator.comparing(ContractItem::getPackagedVolume,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(this::toItemDto)
+                .toList());
         return dto;
     }
 
@@ -165,6 +170,7 @@ public class ContractController {
         dto.setQuantity(ci.getQuantity());
         dto.setIsCapital(ci.getIsCapital());
         dto.setIsRig(Boolean.TRUE.equals(ci.getIsRig()));
+        dto.setPackagedVolume(ci.getPackagedVolume());
         dto.setEstimatedValue(ci.getEstimatedValue());
         return dto;
     }

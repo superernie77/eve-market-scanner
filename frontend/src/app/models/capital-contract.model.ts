@@ -4,6 +4,7 @@ export interface CapitalContractItem {
   quantity: number;
   isCapital: boolean;
   isRig: boolean;
+  packagedVolume: number | null;
   estimatedValue: number | null;
 }
 

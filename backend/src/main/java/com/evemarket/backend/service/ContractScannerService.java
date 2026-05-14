@@ -156,6 +156,7 @@ public class ContractScannerService {
 
         Set<Integer> uniqueGroupIds = new HashSet<>(groupIds.values());
         Set<Integer> rigGroupIds    = esiService.resolveRigGroupIds(uniqueGroupIds);
+        Map<Integer, BigDecimal> packagedVolumes = esiService.resolvePackagedVolumesBatch(allTypeIds);
 
         // Resolve station/structure names (NPC stations resolve via /universe/names/;
         // player structures that fail silently fall back to "Unknown Structure #ID")
@@ -194,6 +195,7 @@ public class ContractScannerService {
                 boolean isCap = capitalGroupIds.contains(gid);
                 ci.setIsCapital(isCap);
                 ci.setIsRig(!isCap && rigGroupIds.contains(gid));
+                ci.setPackagedVolume(packagedVolumes.get(item.getTypeId()));
                 if (!isCap) {
                     BigDecimal unitPrice = universePrices.get(item.getTypeId());
                     if (unitPrice != null) {

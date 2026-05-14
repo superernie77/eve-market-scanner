@@ -13,5 +13,6 @@ public class CapitalContractItemDto {
     private Integer quantity;
     private Boolean isCapital;
     private Boolean isRig;
+    private BigDecimal packagedVolume;
     private BigDecimal estimatedValue;
 }

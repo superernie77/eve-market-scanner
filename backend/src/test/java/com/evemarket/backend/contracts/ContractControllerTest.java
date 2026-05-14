@@ -103,6 +103,47 @@ class ContractControllerTest {
     }
 
     @Test
+    void getCapitalContracts_itemsSortedByVolumeDescending() throws Exception {
+        Contract c = sampleContract(4L, 10000001);
+
+        // volumes: 1 000 000, 5, 100 — expect order: 1 000 000, 100, 5
+        ContractItem cap   = sampleItem(4L, 23911, "Thanatos",  1, true,  null,                      new BigDecimal("1000000"));
+        ContractItem rig   = sampleItem(4L, 31360, "Cap Rig",   1, false, new BigDecimal("50000000"), new BigDecimal("100"));
+        ContractItem small = sampleItem(4L, 34,    "Tritanium", 500, false, new BigDecimal("1000"),   new BigDecimal("5"));
+
+        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(c)));
+        when(contractItemRepository.findByContractIdIn(List.of(4L))).thenReturn(List.of(small, rig, cap));
+
+        mockMvc.perform(get("/api/contracts/capitals"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].items", hasSize(3)))
+                .andExpect(jsonPath("$.content[0].items[0].typeName", is("Thanatos")))
+                .andExpect(jsonPath("$.content[0].items[0].packagedVolume", is(1000000)))
+                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Cap Rig")))
+                .andExpect(jsonPath("$.content[0].items[1].packagedVolume", is(100)))
+                .andExpect(jsonPath("$.content[0].items[2].typeName", is("Tritanium")))
+                .andExpect(jsonPath("$.content[0].items[2].packagedVolume", is(5)));
+    }
+
+    @Test
+    void getCapitalContracts_itemsWithNullVolumeSortedLast() throws Exception {
+        Contract c = sampleContract(5L, 10000001);
+
+        ContractItem withVol    = sampleItem(5L, 34,    "Tritanium", 1, false, null, new BigDecimal("5"));
+        ContractItem withoutVol = sampleItem(5L, 35,    "Pyerite",   1, false, null, null);
+
+        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(c)));
+        when(contractItemRepository.findByContractIdIn(List.of(5L))).thenReturn(List.of(withoutVol, withVol));
+
+        mockMvc.perform(get("/api/contracts/capitals"))
+                .andExpect(jsonPath("$.content[0].items[0].typeName", is("Tritanium")))
+                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Pyerite")))
+                .andExpect(jsonPath("$.content[0].items[1].packagedVolume").doesNotExist());
+    }
+
+    @Test
     void triggerScan_returnsAccepted() throws Exception {
         mockMvc.perform(post("/api/contracts/scan"))
                 .andExpect(status().isAccepted())
@@ -136,6 +177,12 @@ class ContractControllerTest {
 
     private ContractItem sampleItem(long contractId, int typeId, String typeName,
                                     int quantity, boolean isCapital, BigDecimal estimatedValue) {
+        return sampleItem(contractId, typeId, typeName, quantity, isCapital, estimatedValue, null);
+    }
+
+    private ContractItem sampleItem(long contractId, int typeId, String typeName,
+                                    int quantity, boolean isCapital, BigDecimal estimatedValue,
+                                    BigDecimal packagedVolume) {
         ContractItem item = new ContractItem();
         item.setContractId(contractId);
         item.setTypeId(typeId);
@@ -144,6 +191,7 @@ class ContractControllerTest {
         item.setIsCapital(isCapital);
         item.setIsSingleton(false);
         item.setEstimatedValue(estimatedValue);
+        item.setPackagedVolume(packagedVolume);
         return item;
     }
 }

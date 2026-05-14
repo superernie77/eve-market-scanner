@@ -68,6 +68,7 @@ class ContractScannerServiceTest {
         when(esiService.fetchAveragePrices()).thenReturn(Map.of());
         when(esiService.resolveTypeNamesBatch(any())).thenReturn(Map.of());
         when(esiService.resolveGroupIdsBatch(any())).thenReturn(Map.of());
+        when(esiService.resolvePackagedVolumesBatch(any())).thenReturn(Map.of());
     }
 
     // ── Helper builders ───────────────────────────────────────────────────────
@@ -187,7 +188,7 @@ class ContractScannerServiceTest {
     }
 
     @Test
-    void whenContractHasNoCapitals_nothingIsPersisted() {
+    void whenContractHasNoCapitals_savedWithNullCapitalFields() {
         EsiContractDto contract = contractDto(4L, bd("100000000"), future());
 
         when(esiService.fetchContracts(REGION_DERELIK)).thenReturn(List.of(contract));
@@ -206,7 +207,12 @@ class ContractScannerServiceTest {
 
         service.scan();
 
-        verify(contractPersistenceService, never()).saveAll(any(), any());
+        Contract saved = captureFirstContract();
+        assertThat(saved.getCapitalTypeId()).isNull();
+        assertThat(saved.getCapitalTypeName()).isNull();
+        assertThat(saved.getCapitalGroupName()).isNull();
+        assertThat(saved.getCapitalQuantity()).isNull();
+        verify(contractPersistenceService).saveAll(any(), any());
     }
 
     @Test
