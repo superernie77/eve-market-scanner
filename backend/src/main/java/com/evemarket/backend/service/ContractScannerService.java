@@ -4,10 +4,13 @@ import com.evemarket.backend.dto.EsiContractDto;
 import com.evemarket.backend.dto.EsiContractItemDto;
 import com.evemarket.backend.model.Contract;
 import com.evemarket.backend.model.ContractItem;
+import com.evemarket.backend.repository.ContractItemRepository;
 import com.evemarket.backend.repository.ContractRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +19,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -36,11 +44,13 @@ public class ContractScannerService {
 
     private static final Map<Integer, String> REGION_NAMES = Map.of(
             10000001, "Derelik",
-            10000043, "Domain"
+            10000043, "Domain",
+            10000036, "Devoid"
     );
 
     private final EsiService esiService;
     private final ContractRepository contractRepository;
+    private final ContractItemRepository contractItemRepository;
     private final ContractPersistenceService contractPersistenceService;
 
     @Value("${app.contracts.enabled:true}")
@@ -53,6 +63,13 @@ public class ContractScannerService {
     private Set<Integer> capitalGroupIds;
 
     private final AtomicBoolean scanning = new AtomicBoolean(false);
+    private final AtomicInteger currentScanRegionId = new AtomicInteger(0);
+    private final Map<Integer, Instant> lastRegionScanAt = new ConcurrentHashMap<>();
+
+    public boolean isScanning()                   { return scanning.get(); }
+    public int getCurrentRegionId()               { return currentScanRegionId.get(); }
+    public List<Integer> getRegionIds()           { return Collections.unmodifiableList(regionIds); }
+    public Instant getLastScanAt(int regionId)    { return lastRegionScanAt.get(regionId); }
 
     @Scheduled(fixedDelayString  = "${app.contracts.poll-interval-ms:1800000}",
                initialDelayString = "${app.contracts.initial-delay-ms:60000}")
@@ -67,15 +84,19 @@ public class ContractScannerService {
             Map<Integer, BigDecimal> universePrices = esiService.fetchAveragePrices();
             for (int regionId : regionIds) {
                 try {
+                    currentScanRegionId.set(regionId);
                     scanRegion(regionId, universePrices);
                 } catch (Exception e) {
                     log.error("Contract scan failed for region {}: {}", regionId, e.getMessage(), e);
+                } finally {
+                    lastRegionScanAt.put(regionId, Instant.now());
                 }
             }
             pruneExpiredContracts();
             log.info("Contract scan complete.");
         } finally {
             scanning.set(false);
+            currentScanRegionId.set(0);
         }
     }
 
@@ -94,6 +115,16 @@ public class ContractScannerService {
         }
 
         Set<Long> existingIds = contractRepository.findContractIdsByRegionId(regionId);
+
+        // Remove contracts that ESI no longer returns (completed or cancelled in-game)
+        Set<Long> liveIds = all.stream().map(EsiContractDto::getContractId).collect(Collectors.toSet());
+        Set<Long> removedIds = existingIds.stream().filter(id -> !liveIds.contains(id)).collect(Collectors.toSet());
+        if (!removedIds.isEmpty()) {
+            contractItemRepository.deleteByContractIdIn(removedIds);
+            contractRepository.deleteByContractIdIn(removedIds);
+            log.info("Removed {} contracts no longer on ESI for region {}", removedIds.size(), regionId);
+        }
+
         List<EsiContractDto> newContracts = candidates.stream()
                 .filter(c -> !existingIds.contains(c.getContractId()))
                 .toList();
@@ -123,13 +154,16 @@ public class ContractScannerService {
         Map<Integer, String> typeNames = esiService.resolveTypeNamesBatch(allTypeIds);
         Map<Integer, Integer> groupIds  = esiService.resolveGroupIdsBatch(allTypeIds);
 
+        Set<Integer> uniqueGroupIds = new HashSet<>(groupIds.values());
+        Set<Integer> rigGroupIds    = esiService.resolveRigGroupIds(uniqueGroupIds);
+
         // Resolve station/structure names (NPC stations resolve via /universe/names/;
         // player structures that fail silently fall back to "Unknown Structure #ID")
         Set<Long> locationIds = newContracts.stream()
                 .map(EsiContractDto::getStartLocationId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        Map<Long, String> locationNames = esiService.resolveLocationNamesBatch(locationIds);
+        Map<Long, EsiService.LocationResolution> locationNames = esiService.resolveLocationNamesBatch(locationIds);
 
         List<Contract>     contractsToSave = new ArrayList<>();
         List<ContractItem> itemsToSave     = new ArrayList<>();
@@ -142,12 +176,9 @@ public class ContractScannerService {
                     .filter(i -> Boolean.TRUE.equals(i.getIsIncluded()))
                     .toList();
 
-            boolean hasCapital = included.stream()
-                    .anyMatch(i -> capitalGroupIds.contains(groupIds.getOrDefault(i.getTypeId(), -1)));
+            if (included.isEmpty()) continue;
 
-            if (!hasCapital) continue;
-
-            Contract contract = buildContract(dto, included, typeNames, groupIds, universePrices, locationNames, regionId, now);
+            Contract contract = buildContract(dto, included, typeNames, groupIds, universePrices, locationNames, regionId, now, included.size());
             contractsToSave.add(contract);
 
             for (EsiContractItemDto item : included) {
@@ -162,6 +193,7 @@ public class ContractScannerService {
                 ci.setGroupId(gid > 0 ? gid : null);
                 boolean isCap = capitalGroupIds.contains(gid);
                 ci.setIsCapital(isCap);
+                ci.setIsRig(!isCap && rigGroupIds.contains(gid));
                 if (!isCap) {
                     BigDecimal unitPrice = universePrices.get(item.getTypeId());
                     if (unitPrice != null) {
@@ -186,19 +218,26 @@ public class ContractScannerService {
                                    Map<Integer, String> typeNames,
                                    Map<Integer, Integer> groupIds,
                                    Map<Integer, BigDecimal> universePrices,
-                                   Map<Long, String> locationNames,
-                                   int regionId, Instant now) {
+                                   Map<Long, EsiService.LocationResolution> locationNames,
+                                   int regionId, Instant now, int itemCount) {
         Contract c = new Contract();
         c.setContractId(dto.getContractId());
         c.setRegionId(regionId);
         c.setIssuerId(dto.getIssuerId());
         c.setIssuerCorporationId(dto.getIssuerCorporationId());
         c.setStartLocationId(dto.getStartLocationId());
+        c.setItemCount(itemCount);
         if (dto.getStartLocationId() != null) {
-            c.setStartLocationName(locationNames.getOrDefault(
-                    dto.getStartLocationId(), "Unknown #" + dto.getStartLocationId()));
+            EsiService.LocationResolution loc = locationNames.get(dto.getStartLocationId());
+            if (loc != null) {
+                c.setStartLocationName(loc.stationName());
+                c.setStartSystemName(loc.systemName());
+            } else {
+                c.setStartLocationName("Unknown #" + dto.getStartLocationId());
+            }
         }
         c.setPrice(dto.getPrice() != null ? dto.getPrice() : BigDecimal.ZERO);
+        c.setVolume(dto.getVolume());
         c.setDateIssued(dto.getDateIssued());
         c.setDateExpired(dto.getDateExpired());
         c.setTitle(dto.getTitle() != null ? dto.getTitle().trim() : "");
@@ -208,22 +247,6 @@ public class ContractScannerService {
                 .filter(i -> capitalGroupIds.contains(groupIds.getOrDefault(i.getTypeId(), -1)))
                 .toList();
 
-        EsiContractItemDto primaryCap = capitalItems.get(0);
-        c.setCapitalTypeId(primaryCap.getTypeId());
-        c.setCapitalTypeName(typeNames.getOrDefault(primaryCap.getTypeId(), "Unknown Capital"));
-        int primaryGid = groupIds.getOrDefault(primaryCap.getTypeId(), -1);
-        c.setCapitalGroupName(CAPITAL_GROUP_NAMES.getOrDefault(primaryGid, "Capital Ship"));
-
-        int totalCapQty = capitalItems.stream()
-                .mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 1)
-                .sum();
-        c.setCapitalQuantity(totalCapQty);
-
-        boolean mixed = capitalItems.stream()
-                .map(EsiContractItemDto::getTypeId)
-                .distinct().count() > 1;
-        c.setHasMixedCapitals(mixed);
-
         // Non-capital item value
         BigDecimal nonCapValue = BigDecimal.ZERO;
         int unknownCount = 0;
@@ -231,27 +254,121 @@ public class ContractScannerService {
             if (capitalGroupIds.contains(groupIds.getOrDefault(item.getTypeId(), -1))) continue;
             BigDecimal unitPrice = universePrices.get(item.getTypeId());
             if (unitPrice != null) {
-                int qty = item.getQuantity() != null ? item.getQuantity() : 1;
+                int qty = item.getQuantity() != null ? item.getQuantity().intValue() : 1;
                 nonCapValue = nonCapValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
             } else {
                 unknownCount++;
             }
         }
-
         c.setNonCapItemValue(nonCapValue);
-        BigDecimal effectiveTotal = c.getPrice().subtract(nonCapValue);
-        c.setEffectiveCapitalPrice(effectiveTotal);
         c.setPriceIncomplete(unknownCount > 0);
         c.setUnknownPriceItemCount(unknownCount);
 
-        if (!mixed && totalCapQty > 1) {
-            c.setEffectivePricePerUnit(
-                    effectiveTotal.divide(BigDecimal.valueOf(totalCapQty), 2, RoundingMode.HALF_UP));
-        } else {
-            c.setEffectivePricePerUnit(effectiveTotal);
+        if (!capitalItems.isEmpty()) {
+            EsiContractItemDto primaryCap = capitalItems.get(0);
+            c.setCapitalTypeId(primaryCap.getTypeId());
+            c.setCapitalTypeName(typeNames.getOrDefault(primaryCap.getTypeId(), "Unknown Capital"));
+            int primaryGid = groupIds.getOrDefault(primaryCap.getTypeId(), -1);
+            c.setCapitalGroupName(CAPITAL_GROUP_NAMES.getOrDefault(primaryGid, "Capital Ship"));
+
+            int totalCapQty = capitalItems.stream()
+                    .mapToInt(i -> { Integer q = i.getQuantity(); return q != null ? q.intValue() : 1; })
+                    .sum();
+            c.setCapitalQuantity(totalCapQty);
+
+            boolean mixed = capitalItems.stream()
+                    .map(EsiContractItemDto::getTypeId)
+                    .distinct().count() > 1;
+            c.setHasMixedCapitals(mixed);
+
+            BigDecimal effectiveTotal = c.getPrice().subtract(nonCapValue);
+            c.setEffectiveCapitalPrice(effectiveTotal);
+
+            if (!mixed && totalCapQty > 1) {
+                c.setEffectivePricePerUnit(
+                        effectiveTotal.divide(BigDecimal.valueOf(totalCapQty), 2, RoundingMode.HALF_UP));
+            } else {
+                c.setEffectivePricePerUnit(effectiveTotal);
+            }
+        }
+
+        // Total item value = non-cap value + capital items at universe avg price
+        BigDecimal capValue = BigDecimal.ZERO;
+        boolean totalIncomplete = unknownCount > 0;
+        for (EsiContractItemDto item : included) {
+            if (!capitalGroupIds.contains(groupIds.getOrDefault(item.getTypeId(), -1))) continue;
+            BigDecimal unitPrice = universePrices.get(item.getTypeId());
+            if (unitPrice != null) {
+                Integer rawQty = item.getQuantity();
+                int qty = rawQty != null ? rawQty.intValue() : 1;
+                capValue = capValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
+            } else {
+                totalIncomplete = true;
+            }
+        }
+        BigDecimal totalItemValue = nonCapValue.add(capValue);
+        BigDecimal valueDiff = totalItemValue.subtract(c.getPrice());
+        c.setTotalItemValue(totalItemValue);
+        c.setValueDiff(valueDiff);
+        c.setTotalValueIncomplete(totalIncomplete);
+        if (totalItemValue.compareTo(BigDecimal.ZERO) > 0) {
+            c.setValueDiffPct(valueDiff.divide(totalItemValue, 6, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100)));
         }
 
         return c;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void backfill() {
+        backfillRigFlags();
+        backfillTotalItemValues();
+    }
+
+    private void backfillRigFlags() {
+        Set<Integer> groupIds = contractItemRepository.findDistinctGroupIdsWithNullIsRig();
+        if (groupIds.isEmpty()) return;
+        log.info("Backfilling is_rig for {} distinct group IDs", groupIds.size());
+        Set<Integer> rigGroupIds = esiService.resolveRigGroupIds(groupIds);
+        if (!rigGroupIds.isEmpty()) contractItemRepository.markAsRig(rigGroupIds);
+        contractItemRepository.markNonRigRemaining();
+        log.info("is_rig backfill complete — {} rig group(s)", rigGroupIds.size());
+    }
+
+    private void backfillTotalItemValues() {
+        List<Contract> contracts = contractRepository.findByValueDiffIsNull(Instant.now());
+        if (contracts.isEmpty()) return;
+        log.info("Backfilling totalItemValue for {} existing contracts", contracts.size());
+
+        Map<Integer, BigDecimal> universePrices = esiService.fetchAveragePrices();
+        List<Long> ids = contracts.stream().map(Contract::getContractId).toList();
+        Map<Long, List<ContractItem>> itemsByContract = contractItemRepository.findByContractIdIn(ids)
+                .stream().collect(Collectors.groupingBy(ContractItem::getContractId));
+
+        for (Contract c : contracts) {
+            List<ContractItem> items = itemsByContract.getOrDefault(c.getContractId(), List.of());
+            BigDecimal total = BigDecimal.ZERO;
+            boolean incomplete = false;
+            for (ContractItem item : items) {
+                BigDecimal unitPrice = universePrices.get(item.getTypeId());
+                if (unitPrice != null) {
+                    int qty = item.getQuantity() != null ? item.getQuantity() : 1;
+                    total = total.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
+                } else {
+                    incomplete = true;
+                }
+            }
+            BigDecimal diff = total.subtract(c.getPrice());
+            c.setTotalItemValue(total);
+            c.setValueDiff(diff);
+            c.setTotalValueIncomplete(incomplete);
+            if (total.compareTo(BigDecimal.ZERO) > 0) {
+                c.setValueDiffPct(diff.divide(total, 6, RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100)));
+            }
+        }
+        contractRepository.saveAll(contracts);
+        log.info("totalItemValue backfill complete");
     }
 
     public void pruneExpiredContracts() {

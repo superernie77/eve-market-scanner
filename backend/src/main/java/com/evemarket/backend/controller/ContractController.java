@@ -27,12 +27,17 @@ public class ContractController {
 
     private static final Map<Integer, String> REGION_NAMES = Map.of(
             10000001, "Derelik",
-            10000043, "Domain"
+            10000043, "Domain",
+            10000036, "Devoid"
     );
 
     private static final List<String> SORTABLE_FIELDS = List.of(
             "effectivePricePerUnit", "effectiveCapitalPrice", "price",
             "nonCapItemValue", "dateExpired", "capitalTypeName"
+    );
+
+    private static final List<String> DEAL_SORTABLE_FIELDS = List.of(
+            "valueDiff", "valueDiffPct", "price", "totalItemValue", "dateExpired"
     );
 
     private final ContractRepository contractRepository;
@@ -43,8 +48,10 @@ public class ContractController {
     public Page<CapitalContractDto> getCapitalContracts(
             @RequestParam(required = false) Integer regionId,
             @RequestParam(required = false) Integer capitalTypeId,
+            @RequestParam(required = false) String capitalGroupName,
             @RequestParam(required = false) BigDecimal maxPrice,
             @RequestParam(defaultValue = "false") boolean priceCompleteOnly,
+            @RequestParam(defaultValue = "false") boolean noFittings,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
             @RequestParam(defaultValue = "effectivePricePerUnit") String sortBy,
@@ -55,7 +62,37 @@ public class ContractController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(dir, field));
 
         Page<Contract> contracts = contractRepository.findActiveContracts(
-                Instant.now(), regionId, capitalTypeId, maxPrice, priceCompleteOnly, pageable);
+                Instant.now(), regionId, capitalTypeId, capitalGroupName, maxPrice, priceCompleteOnly, noFittings, pageable);
+
+        List<Long> contractIds = contracts.stream().map(Contract::getContractId).toList();
+        List<ContractItem> allItems = contractItemRepository.findByContractIdIn(contractIds);
+
+        Map<Long, List<ContractItem>> itemsByContractId = allItems.stream()
+                .collect(Collectors.groupingBy(ContractItem::getContractId));
+
+        return contracts.map(c -> toDto(c, itemsByContractId.getOrDefault(c.getContractId(), List.of())));
+    }
+
+    @GetMapping("/deals")
+    public Page<CapitalContractDto> getContractDeals(
+            @RequestParam(required = false) Integer regionId,
+            @RequestParam(required = false) BigDecimal minContractValue,
+            @RequestParam(required = false) BigDecimal minAbsDiff,
+            @RequestParam(defaultValue = "0") double minPctDiff,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(defaultValue = "valueDiff") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+
+        Sort.Direction dir = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        String field = DEAL_SORTABLE_FIELDS.contains(sortBy) ? sortBy : "valueDiff";
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(dir, field));
+
+        BigDecimal minValue = minContractValue != null ? minContractValue : BigDecimal.valueOf(1_000_000_000L);
+        double pctFraction = minPctDiff > 0 ? minPctDiff / 100.0 : 0.0;
+
+        Page<Contract> contracts = contractRepository.findDeals(
+                Instant.now(), regionId, minValue, minAbsDiff, pctFraction, pageable);
 
         List<Long> contractIds = contracts.stream().map(Contract::getContractId).toList();
         Map<Long, List<ContractItem>> itemsByContractId = contractItemRepository
@@ -63,6 +100,13 @@ public class ContractController {
                 .collect(Collectors.groupingBy(ContractItem::getContractId));
 
         return contracts.map(c -> toDto(c, itemsByContractId.getOrDefault(c.getContractId(), List.of())));
+    }
+
+    @GetMapping("/capital-names")
+    public List<Map<String, Object>> getCapitalNames() {
+        return contractRepository.findDistinctCapitalTypes(Instant.now()).stream()
+                .map(row -> Map.<String, Object>of("typeId", row[0], "typeName", row[1]))
+                .toList();
     }
 
     @PostMapping("/scan")
@@ -87,6 +131,9 @@ public class ContractController {
         dto.setIssuerId(c.getIssuerId());
         dto.setStartLocationId(c.getStartLocationId());
         dto.setStartLocationName(c.getStartLocationName());
+        dto.setStartSystemName(c.getStartSystemName());
+        dto.setItemCount(c.getItemCount());
+        dto.setVolume(c.getVolume());
         dto.setPrice(c.getPrice());
         dto.setDateIssued(c.getDateIssued());
         dto.setDateExpired(c.getDateExpired());
@@ -101,6 +148,12 @@ public class ContractController {
         dto.setEffectivePricePerUnit(c.getEffectivePricePerUnit());
         dto.setPriceIncomplete(c.getPriceIncomplete());
         dto.setUnknownPriceItemCount(c.getUnknownPriceItemCount());
+        dto.setTotalItemValue(c.getTotalItemValue());
+        dto.setValueDiff(c.getValueDiff());
+        dto.setTotalValueIncomplete(c.getTotalValueIncomplete());
+        if (c.getValueDiffPct() != null) {
+            dto.setValueDiffPct(c.getValueDiffPct().doubleValue());
+        }
         dto.setItems(items.stream().map(this::toItemDto).toList());
         return dto;
     }
@@ -111,6 +164,7 @@ public class ContractController {
         dto.setTypeName(ci.getTypeName());
         dto.setQuantity(ci.getQuantity());
         dto.setIsCapital(ci.getIsCapital());
+        dto.setIsRig(Boolean.TRUE.equals(ci.getIsRig()));
         dto.setEstimatedValue(ci.getEstimatedValue());
         return dto;
     }

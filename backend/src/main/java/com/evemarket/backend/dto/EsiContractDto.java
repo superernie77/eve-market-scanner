@@ -46,4 +46,7 @@ public class EsiContractDto {
 
     @JsonProperty("availability")
     private String availability;
+
+    @JsonProperty("volume")
+    private BigDecimal volume;
 }

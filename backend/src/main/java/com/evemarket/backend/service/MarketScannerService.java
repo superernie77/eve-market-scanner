@@ -17,7 +17,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -41,6 +43,12 @@ public class MarketScannerService {
     private int stalenessThresholdHours;
 
     private final AtomicBoolean scanning = new AtomicBoolean(false);
+    private final AtomicInteger currentScanRegionId = new AtomicInteger(0);
+
+    public boolean isScanning()          { return scanning.get(); }
+    public int getCurrentRegionId()      { return currentScanRegionId.get(); }
+    public List<Integer> getRegionIds()  { return Collections.unmodifiableList(regionIds); }
+    public int getStalenessThresholdHours() { return stalenessThresholdHours; }
 
     @Scheduled(fixedDelayString = "${app.scanner.poll-interval-ms:300000}",
                initialDelayString = "${app.scanner.initial-delay-ms:5000}")
@@ -54,6 +62,7 @@ public class MarketScannerService {
             Map<Integer, BigDecimal> avgPrices = esiService.fetchAveragePrices();
             for (int regionId : regionIds) {
                 try {
+                    currentScanRegionId.set(regionId);
                     scanRegion(regionId, avgPrices);
                 } catch (Exception e) {
                     log.error("Scan failed for region {}: {}", regionId, e.getMessage(), e);
@@ -65,6 +74,7 @@ public class MarketScannerService {
             Thread.ofVirtual().name("category-enrichment").start(esiService::enrichTypeCategories);
         } finally {
             scanning.set(false);
+            currentScanRegionId.set(0);
         }
     }
 

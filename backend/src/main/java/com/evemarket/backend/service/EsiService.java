@@ -173,42 +173,62 @@ public class EsiService {
         return result;
     }
 
+    public record LocationResolution(String stationName, String systemName) {}
+
     /**
-     * Resolves contract start-location IDs to human-readable names.
-     * NPC stations (60_000_000–67_999_999) → GET /universe/stations/{id}/
+     * Resolves contract start-location IDs to station name + solar system name.
+     * NPC stations (60_000_000–67_999_999) → GET /universe/stations/{id}/ then POST /universe/names/ for system IDs.
      * Everything else (player structures, etc.) → falls back to "Unknown #id"
      */
-    public Map<Long, String> resolveLocationNamesBatch(Set<Long> locationIds) {
+    @SuppressWarnings("unchecked")
+    public Map<Long, LocationResolution> resolveLocationNamesBatch(Set<Long> locationIds) {
         if (locationIds.isEmpty()) return Map.of();
 
-        Map<Long, String> result = new ConcurrentHashMap<>();
+        Map<Long, String> stationNames = new ConcurrentHashMap<>();
+        Map<Long, Long>   stationToSystem = new ConcurrentHashMap<>();
+
         List<Mono<Void>> tasks = locationIds.stream()
                 .map(id -> {
                     if (id >= 60_000_000L && id <= 67_999_999L) {
-                        // NPC station
                         return esiWebClient.get()
                                 .uri("/universe/stations/{id}/", id)
                                 .retrieve()
                                 .bodyToMono(Map.class)
                                 .doOnNext(body -> {
                                     Object name = body.get("name");
-                                    if (name instanceof String s) result.put(id, s);
+                                    if (name instanceof String s) stationNames.put(id, s);
+                                    Object sysId = body.get("system_id");
+                                    if (sysId instanceof Number n) stationToSystem.put(id, n.longValue());
                                 })
                                 .onErrorResume(e -> {
                                     log.warn("Could not resolve station {}: {}", id, e.getMessage());
-                                    result.put(id, "Unknown #" + id);
+                                    stationNames.put(id, "Unknown #" + id);
                                     return Mono.<Map>empty();
                                 })
                                 .then();
                     } else {
-                        // Player structure — would need auth; skip for now
-                        result.put(id, "Unknown Structure #" + id);
+                        stationNames.put(id, "Unknown Structure #" + id);
                         return Mono.<Void>empty();
                     }
                 })
                 .toList();
 
         Flux.merge(tasks).blockLast();
+
+        // Batch-resolve system IDs → system names
+        Map<Long, String> systemNames = new HashMap<>();
+        List<Long> systemIds = new ArrayList<>(new HashSet<>(stationToSystem.values()));
+        if (!systemIds.isEmpty()) {
+            fetchSystemNamesFromEsi(systemIds, systemNames);
+        }
+
+        Map<Long, LocationResolution> result = new HashMap<>();
+        for (Long locId : locationIds) {
+            String stName = stationNames.getOrDefault(locId, "Unknown #" + locId);
+            Long sysId = stationToSystem.get(locId);
+            String sysName = sysId != null ? systemNames.getOrDefault(sysId, null) : null;
+            result.put(locId, new LocationResolution(stName, sysName));
+        }
         return result;
     }
 
@@ -295,6 +315,23 @@ public class EsiService {
             saveEnrichedTypes(toUpdate);
             log.info("Enriched {} item types with category info", toUpdate.size());
         }
+    }
+
+    /**
+     * Returns the subset of the given group IDs that belong to the Rig category (ID 66).
+     * Fetches group info from ESI in parallel; unknown groups are silently skipped.
+     */
+    public Set<Integer> resolveRigGroupIds(Set<Integer> groupIds) {
+        if (groupIds.isEmpty()) return Set.of();
+        Set<Integer> rigGroups = ConcurrentHashMap.newKeySet();
+        Flux.fromIterable(groupIds)
+                .flatMap(gid -> fetchGroupInfo(gid)
+                        .filter(g -> g.groupName().startsWith("Rig"))
+                        .map(GroupInfo::groupId)
+                        .onErrorResume(e -> Mono.empty()), 10)
+                .toStream()
+                .forEach(rigGroups::add);
+        return rigGroups;
     }
 
     @Transactional

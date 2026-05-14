@@ -43,6 +43,9 @@ public class ContractItem {
     @Column(name = "is_capital")
     private Boolean isCapital;
 
+    @Column(name = "is_rig")
+    private Boolean isRig;
+
     // quantity × universe average price; null if no price data
     @Column(name = "estimated_value", precision = 20, scale = 2)
     private BigDecimal estimatedValue;

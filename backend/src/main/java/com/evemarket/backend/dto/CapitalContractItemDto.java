@@ -12,5 +12,6 @@ public class CapitalContractItemDto {
     private String typeName;
     private Integer quantity;
     private Boolean isCapital;
+    private Boolean isRig;
     private BigDecimal estimatedValue;
 }

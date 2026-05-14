@@ -13,6 +13,8 @@ import { MyBuyOrdersComponent } from './components/my-buy-orders/my-buy-orders';
 import { CorpTransactionsComponent } from './components/corp-transactions/corp-transactions';
 import { FavouriteArbitrageComponent } from './components/favourite-arbitrage/favourite-arbitrage';
 import { CapitalContractsComponent } from './components/capital-contracts/capital-contracts';
+import { ContractDealsComponent } from './components/contract-deals/contract-deals';
+import { ScanStatusComponent } from './components/scan-status/scan-status';
 import { AuthService } from './services/auth.service';
 
 @Component({
@@ -23,7 +25,7 @@ import { AuthService } from './services/auth.service';
     MatButtonModule, MatTooltipModule,
     MarketTableComponent, ArbitrageComponent,
     MyOrdersComponent, MyBuyOrdersComponent, WalletComponent, CorpTransactionsComponent,
-    FavouriteArbitrageComponent, CapitalContractsComponent
+    FavouriteArbitrageComponent, CapitalContractsComponent, ContractDealsComponent, ScanStatusComponent
   ],
   template: `
     <mat-toolbar color="primary" class="toolbar">
@@ -48,6 +50,8 @@ import { AuthService } from './services/auth.service';
       </ng-container>
     </mat-toolbar>
 
+    <app-scan-status></app-scan-status>
+
     <main class="main-content">
       <div class="content-grid">
         <div class="table-panel">
@@ -70,6 +74,11 @@ import { AuthService } from './services/auth.service';
             <mat-tab label="Capital Contracts">
               <div class="tab-content">
                 <app-capital-contracts></app-capital-contracts>
+              </div>
+            </mat-tab>
+            <mat-tab label="Contract Deals">
+              <div class="tab-content">
+                <app-contract-deals></app-contract-deals>
               </div>
             </mat-tab>
             <mat-tab>

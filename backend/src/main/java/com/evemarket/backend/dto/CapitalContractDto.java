@@ -17,6 +17,9 @@ public class CapitalContractDto {
     private Long issuerId;
     private Long startLocationId;
     private String startLocationName;
+    private String startSystemName;
+    private Integer itemCount;
+    private BigDecimal volume;
     private BigDecimal price;
     private Instant dateIssued;
     private Instant dateExpired;
@@ -35,6 +38,12 @@ public class CapitalContractDto {
     private BigDecimal effectivePricePerUnit;
     private Boolean priceIncomplete;
     private Integer unknownPriceItemCount;
+
+    // Deal comparison
+    private BigDecimal totalItemValue;
+    private BigDecimal valueDiff;
+    private Double valueDiffPct;
+    private Boolean totalValueIncomplete;
 
     private List<CapitalContractItemDto> items;
 }

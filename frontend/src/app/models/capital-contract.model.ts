@@ -3,6 +3,7 @@ export interface CapitalContractItem {
   typeName: string;
   quantity: number;
   isCapital: boolean;
+  isRig: boolean;
   estimatedValue: number | null;
 }
 
@@ -13,16 +14,19 @@ export interface CapitalContract {
   issuerId: number;
   startLocationId: number;
   startLocationName: string;
+  startSystemName: string | null;
+  itemCount: number | null;
+  volume: number | null;
   price: number;
   dateIssued: string;
   dateExpired: string;
   title: string;
 
-  capitalTypeId: number;
-  capitalTypeName: string;
-  capitalGroupName: string;
-  capitalQuantity: number;
-  hasMixedCapitals: boolean;
+  capitalTypeId: number | null;
+  capitalTypeName: string | null;
+  capitalGroupName: string | null;
+  capitalQuantity: number | null;
+  hasMixedCapitals: boolean | null;
 
   nonCapItemValue: number;
   effectiveCapitalPrice: number;
@@ -30,14 +34,37 @@ export interface CapitalContract {
   priceIncomplete: boolean;
   unknownPriceItemCount: number;
 
+  totalItemValue: number | null;
+  valueDiff: number | null;
+  valueDiffPct: number | null;
+  totalValueIncomplete: boolean;
+
   items: CapitalContractItem[];
+}
+
+export interface CapitalTypeOption {
+  typeId: number;
+  typeName: string;
 }
 
 export interface CapitalContractFilter {
   regionId?: number | null;
   capitalTypeId?: number | null;
+  capitalGroupName?: string | null;
   maxPrice?: number | null;
   priceCompleteOnly?: boolean;
+  noFittings?: boolean;
+  page?: number;
+  size?: number;
+  sortBy?: string;
+  sortDir?: string;
+}
+
+export interface ContractDealFilter {
+  regionId?: number | null;
+  minContractValue?: number | null;
+  minAbsDiff?: number | null;
+  minPctDiff?: number;
   page?: number;
   size?: number;
   sortBy?: string;

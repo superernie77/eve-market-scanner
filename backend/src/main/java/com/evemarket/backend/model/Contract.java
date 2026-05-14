@@ -36,6 +36,15 @@ public class Contract {
     @Column(name = "start_location_name")
     private String startLocationName;
 
+    @Column(name = "start_system_name")
+    private String startSystemName;
+
+    @Column(name = "item_count")
+    private Integer itemCount;
+
+    @Column(name = "volume", precision = 20, scale = 2)
+    private BigDecimal volume;
+
     @Column(precision = 20, scale = 2)
     private BigDecimal price;
 
@@ -83,4 +92,19 @@ public class Contract {
 
     @Column(name = "unknown_price_item_count")
     private Integer unknownPriceItemCount;
+
+    // Total market value of ALL items (capital + non-capital) at universe average prices
+    @Column(name = "total_item_value", precision = 20, scale = 2)
+    private BigDecimal totalItemValue;
+
+    // totalItemValue − price (positive = contract is cheaper than market value)
+    @Column(name = "value_diff", precision = 20, scale = 2)
+    private BigDecimal valueDiff;
+
+    // valueDiff / totalItemValue × 100
+    @Column(name = "value_diff_pct", precision = 20, scale = 4)
+    private BigDecimal valueDiffPct;
+
+    @Column(name = "total_value_incomplete")
+    private Boolean totalValueIncomplete;
 }

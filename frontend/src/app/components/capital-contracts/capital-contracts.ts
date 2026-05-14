@@ -15,11 +15,12 @@ import { MatExpansionModule } from '@angular/material/expansion';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { ContractService } from '../../services/contract.service';
-import { CapitalContract } from '../../models/capital-contract.model';
+import { CapitalContract, CapitalTypeOption } from '../../models/capital-contract.model';
 
 const REGIONS = [
   { id: 10000001, name: 'Derelik' },
   { id: 10000043, name: 'Domain'  },
+  { id: 10000036, name: 'Devoid'  },
 ];
 
 const GROUP_COLORS: Record<string, string> = {
@@ -60,6 +61,14 @@ const GROUP_COLORS: Record<string, string> = {
         </mat-select>
       </mat-form-field>
 
+      <mat-form-field appearance="outline" class="filter-field">
+        <mat-label>Ship Name</mat-label>
+        <mat-select [formControl]="filterForm.controls.capitalTypeId">
+          <mat-option [value]="null">All Ships</mat-option>
+          <mat-option *ngFor="let opt of capitalNames" [value]="opt.typeId">{{ opt.typeName }}</mat-option>
+        </mat-select>
+      </mat-form-field>
+
       <mat-form-field appearance="outline" class="filter-field narrow">
         <mat-label>Max Price (B ISK)</mat-label>
         <input matInput type="number" min="0" [formControl]="filterForm.controls.maxPriceBillions"
@@ -69,6 +78,12 @@ const GROUP_COLORS: Record<string, string> = {
       <div class="checkbox-wrap">
         <mat-checkbox [formControl]="filterForm.controls.priceCompleteOnly" color="primary">
           Full pricing only
+        </mat-checkbox>
+      </div>
+
+      <div class="checkbox-wrap">
+        <mat-checkbox [formControl]="filterForm.controls.noFittings" color="primary">
+          No fittings
         </mat-checkbox>
       </div>
 
@@ -129,7 +144,7 @@ const GROUP_COLORS: Record<string, string> = {
         </ng-container>
 
         <ng-container matColumnDef="price">
-          <th mat-header-cell *matHeaderCellDef>Contract Price</th>
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="price">Contract Price</th>
           <td mat-cell *matCellDef="let row" class="num">{{ formatIsk(row.price) }}</td>
         </ng-container>
 
@@ -188,7 +203,8 @@ const GROUP_COLORS: Record<string, string> = {
                  *ngIf="expandedRow === row">
               <div class="item-list">
                 <div class="item-row" *ngFor="let item of row.items"
-                     [class.cap-item]="item.isCapital">
+                     [class.cap-item]="item.isCapital"
+                     [class.rig-item]="item.isRig">
                   <span class="item-qty">{{ item.quantity }}×</span>
                   <span class="item-name">{{ item.typeName }}</span>
                   <span class="item-value" *ngIf="!item.isCapital && item.estimatedValue != null">
@@ -198,6 +214,7 @@ const GROUP_COLORS: Record<string, string> = {
                     no price data
                   </span>
                   <span class="cap-tag" *ngIf="item.isCapital">CAPITAL</span>
+                  <span class="rig-tag" *ngIf="item.isRig">RIG</span>
                 </div>
               </div>
             </div>
@@ -269,6 +286,7 @@ const GROUP_COLORS: Record<string, string> = {
     .region { font-weight: 600; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
     .r10000001 { background: rgba(255,152,0,0.15);  color: #ffb74d; }
     .r10000043 { background: rgba(239,154,154,0.15); color: #ef9a9a; }
+    .r10000036 { background: rgba(144,202,249,0.15); color: #90caf9; }
 
     .num  { font-variant-numeric: tabular-nums; }
     .muted { color: rgba(255,255,255,0.5); }
@@ -297,7 +315,8 @@ const GROUP_COLORS: Record<string, string> = {
       font-size: 0.85rem; padding: 3px 0;
       border-bottom: 1px solid rgba(255,255,255,0.05);
     }
-    .item-row.cap-item { background: rgba(105,240,174,0.05); border-radius: 4px; padding: 3px 6px; }
+    .item-row.cap-item { background: rgba(105,240,174,0.08); border-left: 2px solid rgba(105,240,174,0.5); border-radius: 4px; padding: 3px 6px; }
+    .item-row.rig-item { background: rgba(179,136,255,0.12); border-left: 2px solid rgba(179,136,255,0.6); border-radius: 4px; padding: 3px 6px; }
     .item-qty { color: rgba(255,255,255,0.4); min-width: 32px; text-align: right; }
     .item-name { flex: 1; }
     .item-value { color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums; }
@@ -305,6 +324,11 @@ const GROUP_COLORS: Record<string, string> = {
     .cap-tag {
       font-size: 0.65rem; font-weight: 700;
       color: #69f0ae; border: 1px solid rgba(105,240,174,0.4);
+      padding: 1px 5px; border-radius: 3px; letter-spacing: 0.05em;
+    }
+    .rig-tag {
+      font-size: 0.65rem; font-weight: 700;
+      color: #b39ddb; border: 1px solid rgba(179,136,255,0.4);
       padding: 1px 5px; border-radius: 3px; letter-spacing: 0.05em;
     }
   `]
@@ -317,6 +341,7 @@ export class CapitalContractsComponent implements OnInit {
 
   regions = REGIONS;
   shipClasses = Object.keys(GROUP_COLORS);
+  capitalNames: CapitalTypeOption[] = [];
 
   displayedColumns = [
     'shipClass', 'capitalTypeName', 'region', 'location',
@@ -337,15 +362,18 @@ export class CapitalContractsComponent implements OnInit {
 
   filterForm = this.fb.group({
     regionId:          [null as number | null],
+    capitalTypeId:     [null as number | null],
     shipClass:         [null as string | null],
     maxPriceBillions:  [null as number | null],
     priceCompleteOnly: [false],
+    noFittings:        [false],
   });
 
   ngOnInit() {
+    this.contractService.getCapitalNames().subscribe(names => { this.capitalNames = names; });
     this.load();
-    // Auto-apply when either dropdown changes — no typing involved so no debounce needed
     this.filterForm.controls.regionId.valueChanges.subscribe(() => this.applyFilters());
+    this.filterForm.controls.capitalTypeId.valueChanges.subscribe(() => this.applyFilters());
     this.filterForm.controls.shipClass.valueChanges.subscribe(() => this.applyFilters());
   }
 
@@ -361,18 +389,18 @@ export class CapitalContractsComponent implements OnInit {
 
     this.contractService.getCapitalContracts({
       regionId:          v.regionId ?? null,
+      capitalTypeId:     v.capitalTypeId ?? null,
+      capitalGroupName:  v.shipClass ?? null,
       maxPrice:          v.maxPriceBillions != null ? v.maxPriceBillions * 1_000_000_000 : null,
       priceCompleteOnly: v.priceCompleteOnly ?? false,
+      noFittings:        v.noFittings ?? false,
       page:              this.currentPage,
       size:              this.pageSize,
       sortBy:            this.sortBy,
       sortDir:           this.sortDir,
     }).subscribe({
       next: (page) => {
-        let rows = page.content;
-        const cls = v.shipClass;
-        if (cls) rows = rows.filter(r => r.capitalGroupName === cls);
-        this.dataSource.data = rows;
+        this.dataSource.data = page.content;
         this.totalElements = page.page?.totalElements ?? 0;
         this.loading = false;
       },
