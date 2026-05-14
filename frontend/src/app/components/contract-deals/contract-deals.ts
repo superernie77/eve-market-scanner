@@ -425,10 +425,7 @@ export class ContractDealsComponent implements OnInit {
 
   formatIsk(value: number | null): string {
     if (value == null) return '—';
-    const abs = Math.abs(value);
     const sign = value < 0 ? '-' : '';
-    if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B ISK`;
-    if (abs >= 1_000_000)     return `${sign}${(abs / 1_000_000).toFixed(1)}M ISK`;
-    return `${sign}${abs.toLocaleString()} ISK`;
+    return `${sign}${(Math.abs(value) / 1_000_000).toFixed(2)}M ISK`;
   }
 }
