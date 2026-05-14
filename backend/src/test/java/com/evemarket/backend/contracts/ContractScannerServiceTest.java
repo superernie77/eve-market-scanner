@@ -4,6 +4,7 @@ import com.evemarket.backend.dto.EsiContractDto;
 import com.evemarket.backend.dto.EsiContractItemDto;
 import com.evemarket.backend.model.Contract;
 import com.evemarket.backend.model.ContractItem;
+import com.evemarket.backend.repository.ContractItemRepository;
 import com.evemarket.backend.repository.ContractRepository;
 import com.evemarket.backend.service.ContractPersistenceService;
 import com.evemarket.backend.service.ContractScannerService;
@@ -49,13 +50,14 @@ class ContractScannerServiceTest {
 
     @Mock EsiService esiService;
     @Mock ContractRepository contractRepository;
+    @Mock ContractItemRepository contractItemRepository;
     @Mock ContractPersistenceService contractPersistenceService;
 
     ContractScannerService service;
 
     @BeforeEach
     void setUp() {
-        service = new ContractScannerService(esiService, contractRepository, contractPersistenceService);
+        service = new ContractScannerService(esiService, contractRepository, contractItemRepository, contractPersistenceService);
         ReflectionTestUtils.setField(service, "enabled",       true);
         ReflectionTestUtils.setField(service, "regionIds",     List.of(REGION_DERELIK));
         ReflectionTestUtils.setField(service, "capitalGroupIds",

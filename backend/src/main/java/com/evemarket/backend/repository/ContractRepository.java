@@ -61,6 +61,7 @@ public interface ContractRepository extends JpaRepository<Contract, Long> {
             SELECT c FROM Contract c
             WHERE c.dateExpired > :now
               AND c.valueDiff IS NOT NULL
+              AND c.capitalTypeId IS NULL
               AND c.price >= :minContractValue
               AND (:minAbsDiff IS NULL OR c.valueDiff >= :minAbsDiff)
               AND (:minPctFraction = 0.0 OR c.valueDiff >= c.totalItemValue * :minPctFraction)
@@ -70,6 +71,7 @@ public interface ContractRepository extends JpaRepository<Contract, Long> {
             SELECT COUNT(c) FROM Contract c
             WHERE c.dateExpired > :now
               AND c.valueDiff IS NOT NULL
+              AND c.capitalTypeId IS NULL
               AND c.price >= :minContractValue
               AND (:minAbsDiff IS NULL OR c.valueDiff >= :minAbsDiff)
               AND (:minPctFraction = 0.0 OR c.valueDiff >= c.totalItemValue * :minPctFraction)

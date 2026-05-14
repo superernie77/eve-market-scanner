@@ -120,7 +120,7 @@ class ContractRepositoryTest {
     private Page<Contract> findActive(Integer regionId, Integer capitalTypeId,
                                       BigDecimal maxPrice, boolean priceCompleteOnly) {
         return contractRepository.findActiveContracts(
-                Instant.now(), regionId, capitalTypeId, null, maxPrice, priceCompleteOnly,
+                Instant.now(), regionId, capitalTypeId, null, maxPrice, priceCompleteOnly, false,
                 PageRequest.of(0, 50, Sort.by("effectivePricePerUnit")));
     }
 

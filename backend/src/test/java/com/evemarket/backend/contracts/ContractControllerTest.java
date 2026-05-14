@@ -42,7 +42,7 @@ class ContractControllerTest {
     @Test
     void getCapitalContracts_returnsOkWithPageStructure() throws Exception {
         Contract c = sampleContract(1L, 10000001);
-        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), any(Pageable.class)))
+        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(c)));
         when(contractItemRepository.findByContractIdIn(List.of(1L))).thenReturn(List.of());
 
@@ -63,7 +63,7 @@ class ContractControllerTest {
         ContractItem capItem   = sampleItem(c.getContractId(), 23911, "Thanatos",  1,    true,  null);
         ContractItem extraItem = sampleItem(c.getContractId(), 34,    "Tritanium", 1000, false, new BigDecimal("34000"));
 
-        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), any(Pageable.class)))
+        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(c)));
         when(contractItemRepository.findByContractIdIn(List.of(2L))).thenReturn(List.of(capItem, extraItem));
 
@@ -82,7 +82,7 @@ class ContractControllerTest {
     @Test
     void getCapitalContracts_domainRegion_regionNameIsDomain() throws Exception {
         Contract c = sampleContract(3L, 10000043);
-        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), any(Pageable.class)))
+        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(c)));
         when(contractItemRepository.findByContractIdIn(List.of(3L))).thenReturn(List.of());
 
@@ -92,7 +92,7 @@ class ContractControllerTest {
 
     @Test
     void getCapitalContracts_emptyResult_returns200WithEmptyPage() throws Exception {
-        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), any(Pageable.class)))
+        when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
         when(contractItemRepository.findByContractIdIn(List.of())).thenReturn(List.of());
 
