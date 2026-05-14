@@ -106,10 +106,13 @@ class ContractControllerTest {
     void getCapitalContracts_itemsSortedByVolumeDescending() throws Exception {
         Contract c = sampleContract(4L, 10000001);
 
-        // volumes: 1 000 000, 5, 100 — expect order: 1 000 000, 100, 5
-        ContractItem cap   = sampleItem(4L, 23911, "Thanatos",  1, true,  null,                      new BigDecimal("1000000"));
-        ContractItem rig   = sampleItem(4L, 31360, "Cap Rig",   1, false, new BigDecimal("50000000"), new BigDecimal("100"));
-        ContractItem small = sampleItem(4L, 34,    "Tritanium", 500, false, new BigDecimal("1000"),   new BigDecimal("5"));
+        // Sort is by total volume (qty × unitVol) descending:
+        //   Thanatos:  1 × 1 000 000 = 1 000 000
+        //   Tritanium: 500 × 5       = 2 500        ← beats Cap Rig on total
+        //   Cap Rig:   1 × 100       = 100
+        ContractItem cap   = sampleItem(4L, 23911, "Thanatos",  1,   true,  null,                      new BigDecimal("1000000"));
+        ContractItem rig   = sampleItem(4L, 31360, "Cap Rig",   1,   false, new BigDecimal("50000000"), new BigDecimal("100"));
+        ContractItem small = sampleItem(4L, 34,    "Tritanium", 500, false, new BigDecimal("1000"),     new BigDecimal("5"));
 
         when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(c)));
@@ -120,10 +123,10 @@ class ContractControllerTest {
                 .andExpect(jsonPath("$.content[0].items", hasSize(3)))
                 .andExpect(jsonPath("$.content[0].items[0].typeName", is("Thanatos")))
                 .andExpect(jsonPath("$.content[0].items[0].packagedVolume", is(1000000)))
-                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Cap Rig")))
-                .andExpect(jsonPath("$.content[0].items[1].packagedVolume", is(100)))
-                .andExpect(jsonPath("$.content[0].items[2].typeName", is("Tritanium")))
-                .andExpect(jsonPath("$.content[0].items[2].packagedVolume", is(5)));
+                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Tritanium")))
+                .andExpect(jsonPath("$.content[0].items[1].packagedVolume", is(5)))
+                .andExpect(jsonPath("$.content[0].items[2].typeName", is("Cap Rig")))
+                .andExpect(jsonPath("$.content[0].items[2].packagedVolume", is(100)));
     }
 
     @Test
