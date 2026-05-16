@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { ArbitrageFilter, ArbitrageOpportunity, CorpTransaction, MarketOffer, MarketStats, MyOrder, Page, WalletData } from '../models/market-offer.model';
+import { ArbitrageFilter, ArbitrageOpportunity, CorpTransaction, MarketOffer, MarketStats, MyContract, MyContractItem, MyOrder, Page, WalletData } from '../models/market-offer.model';
 
 const API_BASE = 'http://localhost:8080/api/market';
 
@@ -92,6 +92,17 @@ export class MarketService {
 
   getWallet(): Observable<WalletData> {
     return this.http.get<WalletData>('http://localhost:8080/api/wallet');
+  }
+
+  getMyContracts(): Observable<MyContract[]> {
+    return this.http.get<MyContract[]>('http://localhost:8080/api/contracts/my-contracts');
+  }
+
+  getMyContractItems(contractId: number, source: string): Observable<MyContractItem[]> {
+    return this.http.get<MyContractItem[]>(
+      `http://localhost:8080/api/contracts/my-contracts/${contractId}/items`,
+      { params: { source } }
+    );
   }
 
   getCorpTransactions(): Observable<CorpTransaction[]> {

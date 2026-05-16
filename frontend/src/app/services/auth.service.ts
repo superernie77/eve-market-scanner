@@ -7,9 +7,15 @@ export interface AuthStatus {
   characterName: string | null;
   hasWalletScope: boolean;
   hasCorpWalletScope: boolean;
+  hasContractScope: boolean;
+  hasCorpContractScope: boolean;
 }
 
-const DEFAULT_STATUS: AuthStatus = { loggedIn: false, characterName: null, hasWalletScope: false, hasCorpWalletScope: false };
+const DEFAULT_STATUS: AuthStatus = {
+  loggedIn: false, characterName: null,
+  hasWalletScope: false, hasCorpWalletScope: false,
+  hasContractScope: false, hasCorpContractScope: false,
+};
 const AUTH_BASE = 'http://localhost:8080/api/auth';
 
 @Injectable({ providedIn: 'root' })

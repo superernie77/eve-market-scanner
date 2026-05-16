@@ -114,6 +114,8 @@ POST /api/contracts/scan      trigger immediate contract scan
 ```
 
 ## Tests
+- Always create tests for changes and run existing tests-
+- Always test changes via api in the backend
 Run with `./mvnw test`. Three test classes cover the contract feature:
 - `ContractScannerServiceTest` — 11 unit tests (Mockito): price calculation, capital detection, skip-expired, skip-existing, mixed capitals, negative effective price
 - `ContractRepositoryTest` — 7 `@DataJpaTest` tests: active-contract query filters, expiry pruning

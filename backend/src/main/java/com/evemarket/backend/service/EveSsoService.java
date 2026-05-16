@@ -1,6 +1,8 @@
 package com.evemarket.backend.service;
 
 import com.evemarket.backend.config.EveSsoConfig;
+import com.evemarket.backend.dto.MyContractDto;
+import com.evemarket.backend.dto.MyContractItemDto;
 import com.evemarket.backend.dto.MyOrderDto;
 import com.evemarket.backend.dto.TransactionDto;
 import com.evemarket.backend.dto.WalletDto;
@@ -26,7 +28,7 @@ public class EveSsoService {
 
     private static final String SSO_TOKEN_URL  = "https://login.eveonline.com/v2/oauth/token";
     private static final String SSO_AUTH_URL   = "https://login.eveonline.com/v2/oauth/authorize";
-    private static final String SSO_SCOPE      = "esi-markets.read_character_orders.v1 esi-markets.read_corporation_orders.v1 esi-wallet.read_character_wallet.v1 esi-wallet.read_corporation_wallets.v1";
+    private static final String SSO_SCOPE      = "esi-markets.read_character_orders.v1 esi-markets.read_corporation_orders.v1 esi-wallet.read_character_wallet.v1 esi-wallet.read_corporation_wallets.v1 esi-contracts.read_character_contracts.v1 esi-contracts.read_corporation_contracts.v1";
     private static final String ESI_BASE       = "https://esi.evetech.net/latest";
 
     private static final Map<Integer, String> REGION_NAMES = Map.of(
@@ -325,6 +327,165 @@ public class EveSsoService {
         return dto;
     }
 
+    /**
+     * Fetch all contracts the character is involved in (character endpoint) plus
+     * contracts the character issued on behalf of their corporation (corp endpoint,
+     * filtered to this character's issuer ID). Deduplicates by contractId,
+     * preferring the corp-sourced record for for_corporation contracts.
+     * Resolves start/end location names via ESI.
+     */
+    public List<MyContractDto> fetchMyContracts() {
+        int    charId = characterSession.getCharacterId();
+        int    corpId = characterSession.getCorporationId();
+        String token  = characterSession.getAccessToken();
+
+        List<EsiCharacterContractDto> charContracts = new ArrayList<>();
+        for (int page = 1; page <= 5; page++) {
+            final int p = page;
+            List<EsiCharacterContractDto> pageData;
+            try {
+                pageData = webClient.get()
+                        .uri(ESI_BASE + "/characters/{id}/contracts/?page={page}", charId, p)
+                        .header("Authorization", "Bearer " + token)
+                        .retrieve()
+                        .bodyToFlux(EsiCharacterContractDto.class)
+                        .collectList()
+                        .block();
+            } catch (Exception e) {
+                log.warn("Could not fetch character contracts page {}: {}", p, e.getMessage());
+                break;
+            }
+            if (pageData == null || pageData.isEmpty()) break;
+            charContracts.addAll(pageData);
+            if (pageData.size() < 1000) break;
+        }
+
+        List<EsiCharacterContractDto> corpContracts = new ArrayList<>();
+        if (corpId > 0) {
+            for (int page = 1; page <= 5; page++) {
+                final int p = page;
+                List<EsiCharacterContractDto> pageData;
+                try {
+                    pageData = webClient.get()
+                            .uri(ESI_BASE + "/corporations/{id}/contracts/?page={page}", corpId, p)
+                            .header("Authorization", "Bearer " + token)
+                            .retrieve()
+                            .bodyToFlux(EsiCharacterContractDto.class)
+                            .collectList()
+                            .block();
+                } catch (Exception e) {
+                    log.warn("Could not fetch corporation contracts page {} (may lack scope or role): {}", p, e.getMessage());
+                    break;
+                }
+                if (pageData == null || pageData.isEmpty()) break;
+                pageData.stream()
+                        .filter(c -> c.getIssuerId() == charId)
+                        .forEach(corpContracts::add);
+                if (pageData.size() < 1000) break;
+            }
+        }
+
+        // Collect unique location IDs for name resolution
+        Set<Long> locationIds = new HashSet<>();
+        for (EsiCharacterContractDto c : charContracts) {
+            if (c.getStartLocationId() > 0) locationIds.add(c.getStartLocationId());
+            if (c.getEndLocationId()   > 0) locationIds.add(c.getEndLocationId());
+        }
+        for (EsiCharacterContractDto c : corpContracts) {
+            if (c.getStartLocationId() > 0) locationIds.add(c.getStartLocationId());
+            if (c.getEndLocationId()   > 0) locationIds.add(c.getEndLocationId());
+        }
+        Map<Long, EsiService.LocationResolution> locationMap = esiService.resolveLocationNamesBatch(locationIds);
+
+        // Build result, deduplicating by contractId (corp record wins)
+        Map<Long, MyContractDto> seen = new java.util.LinkedHashMap<>();
+        for (EsiCharacterContractDto c : charContracts) {
+            seen.put(c.getContractId(), toMyContractDto(c, locationMap, "Character"));
+        }
+        for (EsiCharacterContractDto c : corpContracts) {
+            seen.put(c.getContractId(), toMyContractDto(c, locationMap, "Corporation"));
+        }
+
+        List<MyContractDto> result = new ArrayList<>(seen.values());
+        result.sort(Comparator.comparing(MyContractDto::getDateIssued,
+                Comparator.nullsLast(Comparator.reverseOrder())));
+        return result;
+    }
+
+    private MyContractDto toMyContractDto(EsiCharacterContractDto c,
+                                          Map<Long, EsiService.LocationResolution> locationMap,
+                                          String source) {
+        MyContractDto dto = new MyContractDto();
+        dto.setContractId(c.getContractId());
+        dto.setType(c.getType());
+        dto.setStatus(c.getStatus());
+        dto.setTitle(c.getTitle());
+        dto.setAvailability(c.getAvailability());
+        dto.setForCorporation(c.isForCorporation());
+        dto.setIssuerId(c.getIssuerId());
+        dto.setIssuerCorporationId(c.getIssuerCorporationId());
+        dto.setAssigneeId(c.getAssigneeId());
+        dto.setAcceptorId(c.getAcceptorId());
+        dto.setStartLocationId(c.getStartLocationId());
+        EsiService.LocationResolution startLoc = locationMap.get(c.getStartLocationId());
+        dto.setStartLocationName(startLoc != null ? startLoc.stationName() : "Location " + c.getStartLocationId());
+        dto.setEndLocationId(c.getEndLocationId());
+        if (c.getEndLocationId() > 0) {
+            EsiService.LocationResolution endLoc = locationMap.get(c.getEndLocationId());
+            dto.setEndLocationName(endLoc != null ? endLoc.stationName() : "Location " + c.getEndLocationId());
+        }
+        dto.setPrice(c.getPrice());
+        dto.setReward(c.getReward());
+        dto.setCollateral(c.getCollateral());
+        dto.setVolume(c.getVolume());
+        dto.setDateIssued(c.getDateIssued());
+        dto.setDateExpired(c.getDateExpired());
+        dto.setDateAccepted(c.getDateAccepted());
+        dto.setDateCompleted(c.getDateCompleted());
+        dto.setSource(source);
+        return dto;
+    }
+
+    public List<MyContractItemDto> fetchMyContractItems(long contractId, String source) {
+        int    charId = characterSession.getCharacterId();
+        int    corpId = characterSession.getCorporationId();
+        String token  = characterSession.getAccessToken();
+
+        String uri = "Corporation".equals(source)
+                ? ESI_BASE + "/corporations/" + corpId + "/contracts/" + contractId + "/items/"
+                : ESI_BASE + "/characters/" + charId + "/contracts/" + contractId + "/items/";
+
+        List<EsiContractItemDto> esiItems;
+        try {
+            esiItems = webClient.get()
+                    .uri(uri)
+                    .header("Authorization", "Bearer " + token)
+                    .retrieve()
+                    .bodyToFlux(EsiContractItemDto.class)
+                    .collectList()
+                    .block();
+        } catch (Exception e) {
+            log.warn("Could not fetch items for contract {}: {}", contractId, e.getMessage());
+            return Collections.emptyList();
+        }
+        if (esiItems == null) return Collections.emptyList();
+
+        Set<Integer> typeIds = esiItems.stream().map(EsiContractItemDto::getTypeId).collect(Collectors.toSet());
+        Map<Integer, String> nameMap = new HashMap<>();
+        itemTypeRepository.findAllById(typeIds).forEach(it -> nameMap.put(it.getTypeId(), it.getName()));
+
+        return esiItems.stream().map(i -> {
+            MyContractItemDto dto = new MyContractItemDto();
+            dto.setTypeId(i.getTypeId());
+            dto.setTypeName(nameMap.getOrDefault(i.getTypeId(), "Type " + i.getTypeId()));
+            dto.setQuantity(i.getQuantity());
+            dto.setIncluded(i.isIncluded());
+            dto.setSingleton(i.isSingleton());
+            return dto;
+        }).sorted(Comparator.comparing(MyContractItemDto::getTypeName))
+          .collect(Collectors.toList());
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /** Fetch the character's corporation ID from the public ESI character endpoint. */
@@ -499,6 +660,41 @@ public class EveSsoService {
     static class CorpWalletResponseDto {
         @JsonProperty("division") private int        division;
         @JsonProperty("balance")  private BigDecimal balance;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class EsiContractItemDto {
+        @JsonProperty("type_id")      private int     typeId;
+        @JsonProperty("quantity")     private int     quantity;
+        @JsonProperty("is_included")  private boolean included;
+        @JsonProperty("is_singleton") private boolean singleton;
+        @JsonProperty("record_id")    private long    recordId;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class EsiCharacterContractDto {
+        @JsonProperty("contract_id")            private long       contractId;
+        @JsonProperty("type")                   private String     type;
+        @JsonProperty("status")                 private String     status;
+        @JsonProperty("title")                  private String     title;
+        @JsonProperty("availability")           private String     availability;
+        @JsonProperty("for_corporation")        private boolean    forCorporation;
+        @JsonProperty("issuer_id")              private long       issuerId;
+        @JsonProperty("issuer_corporation_id")  private long       issuerCorporationId;
+        @JsonProperty("assignee_id")            private long       assigneeId;
+        @JsonProperty("acceptor_id")            private long       acceptorId;
+        @JsonProperty("start_location_id")      private long       startLocationId;
+        @JsonProperty("end_location_id")        private long       endLocationId;
+        @JsonProperty("price")                  private BigDecimal price;
+        @JsonProperty("reward")                 private BigDecimal reward;
+        @JsonProperty("collateral")             private BigDecimal collateral;
+        @JsonProperty("volume")                 private double     volume;
+        @JsonProperty("date_issued")            private String     dateIssued;
+        @JsonProperty("date_expired")           private String     dateExpired;
+        @JsonProperty("date_accepted")          private String     dateAccepted;
+        @JsonProperty("date_completed")         private String     dateCompleted;
     }
 
     @Data

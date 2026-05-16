@@ -2,11 +2,15 @@ package com.evemarket.backend.controller;
 
 import com.evemarket.backend.dto.CapitalContractDto;
 import com.evemarket.backend.dto.CapitalContractItemDto;
+import com.evemarket.backend.dto.MyContractDto;
+import com.evemarket.backend.dto.MyContractItemDto;
 import com.evemarket.backend.model.Contract;
 import com.evemarket.backend.model.ContractItem;
 import com.evemarket.backend.repository.ContractItemRepository;
 import com.evemarket.backend.repository.ContractRepository;
+import com.evemarket.backend.service.CharacterSession;
 import com.evemarket.backend.service.ContractScannerService;
+import com.evemarket.backend.service.EveSsoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,9 +45,11 @@ public class ContractController {
             "valueDiff", "valueDiffPct", "price", "totalItemValue", "dateExpired"
     );
 
-    private final ContractRepository contractRepository;
+    private final ContractRepository     contractRepository;
     private final ContractItemRepository contractItemRepository;
     private final ContractScannerService contractScannerService;
+    private final EveSsoService          eveSsoService;
+    private final CharacterSession       characterSession;
 
     @GetMapping("/capitals")
     public Page<CapitalContractDto> getCapitalContracts(
@@ -108,6 +114,27 @@ public class ContractController {
         return contractRepository.findDistinctCapitalTypes(Instant.now()).stream()
                 .map(row -> Map.<String, Object>of("typeId", row[0], "typeName", row[1]))
                 .toList();
+    }
+
+    @GetMapping("/my-contracts/{contractId}/items")
+    public ResponseEntity<?> getMyContractItems(
+            @PathVariable long contractId,
+            @RequestParam(defaultValue = "Character") String source) {
+        if (!characterSession.isLoggedIn()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Not logged in"));
+        }
+        eveSsoService.refreshIfNeeded();
+        List<MyContractItemDto> items = eveSsoService.fetchMyContractItems(contractId, source);
+        return ResponseEntity.ok(items);
+    }
+
+    @GetMapping("/my-contracts")
+    public ResponseEntity<?> getMyContracts() {
+        if (!characterSession.isLoggedIn()) {
+            return ResponseEntity.status(401).body(Map.of("error", "Not logged in"));
+        }
+        eveSsoService.refreshIfNeeded();
+        return ResponseEntity.ok(eveSsoService.fetchMyContracts());
     }
 
     @PostMapping("/scan")

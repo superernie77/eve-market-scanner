@@ -14,6 +14,7 @@ import { CorpTransactionsComponent } from './components/corp-transactions/corp-t
 import { FavouriteArbitrageComponent } from './components/favourite-arbitrage/favourite-arbitrage';
 import { CapitalContractsComponent } from './components/capital-contracts/capital-contracts';
 import { ContractDealsComponent } from './components/contract-deals/contract-deals';
+import { MyContractsComponent } from './components/my-contracts/my-contracts';
 import { ScanStatusComponent } from './components/scan-status/scan-status';
 import { AuthService } from './services/auth.service';
 
@@ -25,7 +26,8 @@ import { AuthService } from './services/auth.service';
     MatButtonModule, MatTooltipModule,
     MarketTableComponent, ArbitrageComponent,
     MyOrdersComponent, MyBuyOrdersComponent, WalletComponent, CorpTransactionsComponent,
-    FavouriteArbitrageComponent, CapitalContractsComponent, ContractDealsComponent, ScanStatusComponent
+    FavouriteArbitrageComponent, CapitalContractsComponent, ContractDealsComponent,
+    MyContractsComponent, ScanStatusComponent
   ],
   template: `
     <mat-toolbar color="primary" class="toolbar">
@@ -79,6 +81,11 @@ import { AuthService } from './services/auth.service';
             <mat-tab label="Contract Deals">
               <div class="tab-content">
                 <app-contract-deals></app-contract-deals>
+              </div>
+            </mat-tab>
+            <mat-tab label="My Contracts">
+              <div class="tab-content">
+                <app-my-contracts></app-my-contracts>
               </div>
             </mat-tab>
             <mat-tab>

@@ -93,6 +93,40 @@ export interface Favourite {
   typeName: string;
 }
 
+export interface MyContractItem {
+  typeId: number;
+  typeName: string;
+  quantity: number;
+  included: boolean;
+  singleton: boolean;
+}
+
+export interface MyContract {
+  contractId: number;
+  type: string;
+  status: string;
+  title: string | null;
+  availability: string;
+  forCorporation: boolean;
+  issuerId: number;
+  issuerCorporationId: number;
+  assigneeId: number;
+  acceptorId: number;
+  startLocationId: number;
+  startLocationName: string;
+  endLocationId: number;
+  endLocationName: string | null;
+  price: number | null;
+  reward: number | null;
+  collateral: number | null;
+  volume: number;
+  dateIssued: string;
+  dateExpired: string | null;
+  dateAccepted: string | null;
+  dateCompleted: string | null;
+  source: 'Character' | 'Corporation';
+}
+
 export interface ArbitrageFilter {
   minAveragePrice?: number | null;
   maxAveragePrice?: number | null;

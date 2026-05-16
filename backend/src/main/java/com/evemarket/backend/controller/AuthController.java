@@ -91,8 +91,10 @@ public class AuthController {
         Map<String, Object> body = new java.util.HashMap<>();
         body.put("loggedIn",           loggedIn);
         body.put("characterName",      loggedIn ? characterSession.getCharacterName() : "");
-        body.put("hasWalletScope",     loggedIn && characterSession.hasScope("esi-wallet.read_character_wallet.v1"));
-        body.put("hasCorpWalletScope", loggedIn && characterSession.hasScope("esi-wallet.read_corporation_wallets.v1"));
+        body.put("hasWalletScope",        loggedIn && characterSession.hasScope("esi-wallet.read_character_wallet.v1"));
+        body.put("hasCorpWalletScope",    loggedIn && characterSession.hasScope("esi-wallet.read_corporation_wallets.v1"));
+        body.put("hasContractScope",      loggedIn && characterSession.hasScope("esi-contracts.read_character_contracts.v1"));
+        body.put("hasCorpContractScope",  loggedIn && characterSession.hasScope("esi-contracts.read_corporation_contracts.v1"));
         return ResponseEntity.ok(body);
     }
 }
