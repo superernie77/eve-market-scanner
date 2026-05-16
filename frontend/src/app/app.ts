@@ -15,6 +15,7 @@ import { FavouriteArbitrageComponent } from './components/favourite-arbitrage/fa
 import { CapitalContractsComponent } from './components/capital-contracts/capital-contracts';
 import { ContractDealsComponent } from './components/contract-deals/contract-deals';
 import { MyContractsComponent } from './components/my-contracts/my-contracts';
+import { WealthSummaryComponent } from './components/wealth-summary/wealth-summary';
 import { ScanStatusComponent } from './components/scan-status/scan-status';
 import { AuthService } from './services/auth.service';
 
@@ -27,7 +28,7 @@ import { AuthService } from './services/auth.service';
     MarketTableComponent, ArbitrageComponent,
     MyOrdersComponent, MyBuyOrdersComponent, WalletComponent, CorpTransactionsComponent,
     FavouriteArbitrageComponent, CapitalContractsComponent, ContractDealsComponent,
-    MyContractsComponent, ScanStatusComponent
+    MyContractsComponent, WealthSummaryComponent, ScanStatusComponent
   ],
   template: `
     <mat-toolbar color="primary" class="toolbar">
@@ -56,6 +57,7 @@ import { AuthService } from './services/auth.service';
 
     <main class="main-content">
       <div class="content-grid">
+        <app-wealth-summary></app-wealth-summary>
         <div class="table-panel">
           <mat-tab-group animationDuration="200ms" [preserveContent]="true">
             <mat-tab label="All Orders">
