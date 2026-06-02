@@ -184,10 +184,8 @@ public class ContractController {
         }
         dto.setItems(items.stream()
                 .sorted(Comparator.<ContractItem, BigDecimal>comparing(
-                        item -> item.getPackagedVolume() != null
-                                ? item.getPackagedVolume().multiply(BigDecimal.valueOf(item.getQuantity()))
-                                : null,
-                        Comparator.nullsLast(Comparator.reverseOrder())))
+                        ContractItem::getEstimatedValue,
+                        Comparator.nullsFirst(Comparator.reverseOrder())))
                 .map(this::toItemDto)
                 .toList());
         return dto;

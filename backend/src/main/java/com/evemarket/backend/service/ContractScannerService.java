@@ -179,7 +179,7 @@ public class ContractScannerService {
 
             if (included.isEmpty()) continue;
 
-            Contract contract = buildContract(dto, included, typeNames, groupIds, universePrices, locationNames, regionId, now, included.size());
+            Contract contract = buildContract(dto, included, typeNames, groupIds, universePrices, locationNames, rigGroupIds, regionId, now, included.size());
             contractsToSave.add(contract);
 
             for (EsiContractItemDto item : included) {
@@ -221,6 +221,7 @@ public class ContractScannerService {
                                    Map<Integer, Integer> groupIds,
                                    Map<Integer, BigDecimal> universePrices,
                                    Map<Long, EsiService.LocationResolution> locationNames,
+                                   Set<Integer> rigGroupIds,
                                    int regionId, Instant now, int itemCount) {
         Contract c = new Contract();
         c.setContractId(dto.getContractId());
@@ -249,11 +250,13 @@ public class ContractScannerService {
                 .filter(i -> capitalGroupIds.contains(groupIds.getOrDefault(i.getTypeId(), -1)))
                 .toList();
 
-        // Non-capital item value
+        // Non-capital, non-rig item value (rigs excluded — destroyed on repackage, value not recoverable)
         BigDecimal nonCapValue = BigDecimal.ZERO;
         int unknownCount = 0;
         for (EsiContractItemDto item : included) {
-            if (capitalGroupIds.contains(groupIds.getOrDefault(item.getTypeId(), -1))) continue;
+            int gid = groupIds.getOrDefault(item.getTypeId(), -1);
+            if (capitalGroupIds.contains(gid)) continue;
+            if (rigGroupIds.contains(gid)) continue;
             BigDecimal unitPrice = universePrices.get(item.getTypeId());
             if (unitPrice != null) {
                 int qty = item.getQuantity() != null ? item.getQuantity().intValue() : 1;
@@ -294,21 +297,18 @@ public class ContractScannerService {
             }
         }
 
-        // Total item value = non-cap value + capital items at universe avg price
-        BigDecimal capValue = BigDecimal.ZERO;
-        boolean totalIncomplete = unknownCount > 0;
+        // Total item value = all items at universe avg price (rigs included at market value)
+        BigDecimal totalItemValue = BigDecimal.ZERO;
+        boolean totalIncomplete = false;
         for (EsiContractItemDto item : included) {
-            if (!capitalGroupIds.contains(groupIds.getOrDefault(item.getTypeId(), -1))) continue;
             BigDecimal unitPrice = universePrices.get(item.getTypeId());
             if (unitPrice != null) {
-                Integer rawQty = item.getQuantity();
-                int qty = rawQty != null ? rawQty.intValue() : 1;
-                capValue = capValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
+                int qty = item.getQuantity() != null ? item.getQuantity().intValue() : 1;
+                totalItemValue = totalItemValue.add(unitPrice.multiply(BigDecimal.valueOf(qty)));
             } else {
                 totalIncomplete = true;
             }
         }
-        BigDecimal totalItemValue = nonCapValue.add(capValue);
         BigDecimal valueDiff = totalItemValue.subtract(c.getPrice());
         c.setTotalItemValue(totalItemValue);
         c.setValueDiff(valueDiff);

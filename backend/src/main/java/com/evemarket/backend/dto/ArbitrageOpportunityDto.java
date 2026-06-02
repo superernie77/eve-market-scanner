@@ -15,7 +15,7 @@ public class ArbitrageOpportunityDto {
     private String     sellRegionName;
     private BigDecimal sellPrice;
     private Double     gapPercent;
-    private Integer    volumeAvailable;
+    private Long       volumeAvailable;
     private BigDecimal averagePrice;
     private boolean    alreadyListed;
 }

@@ -40,11 +40,13 @@ class ContractScannerServiceTest {
     private static final int PHOENIX_TYPE_ID   = 19724; // Dreadnought
     private static final int TRITANIUM_TYPE_ID = 34;    // Mineral
     private static final int MODULE_TYPE_ID    = 3756;  // Non-capital module
+    private static final int RIG_TYPE_ID       = 30583; // Capital rig
 
     private static final int GROUP_CARRIER     = 547;
     private static final int GROUP_DREADNOUGHT = 485;
     private static final int GROUP_MINERAL     = 18;
     private static final int GROUP_MODULE      = 55;
+    private static final int GROUP_RIG         = 1140;  // Capital Armor Rigs
 
     private static final int REGION_DERELIK = 10000001;
 
@@ -69,6 +71,7 @@ class ContractScannerServiceTest {
         when(esiService.resolveTypeNamesBatch(any())).thenReturn(Map.of());
         when(esiService.resolveGroupIdsBatch(any())).thenReturn(Map.of());
         when(esiService.resolvePackagedVolumesBatch(any())).thenReturn(Map.of());
+        when(esiService.resolveRigGroupIds(any())).thenReturn(Set.of());
     }
 
     // ── Helper builders ───────────────────────────────────────────────────────
@@ -365,6 +368,46 @@ class ContractScannerServiceTest {
 
         assertThat(cap.getIsCapital()).isTrue();
         assertThat(mineral.getIsCapital()).isFalse();
+    }
+
+    @Test
+    void whenContractHasRigs_rigValueExcludedFromEffectivePrice() {
+        // Rigs are destroyed on repackage → their value should NOT reduce the effective hull price
+        BigDecimal price = bd("5000000000"); // 5B ISK
+        EsiContractDto contract = contractDto(12L, price, future());
+
+        when(esiService.fetchContracts(REGION_DERELIK)).thenReturn(List.of(contract));
+        when(esiService.fetchContractItemsBulk(List.of(12L))).thenReturn(Map.of(12L, List.of(
+                itemDto(120L, THANATOS_TYPE_ID, 1),
+                itemDto(121L, MODULE_TYPE_ID,   5),   // 5 × 1M = 5M (recoverable → subtracted)
+                itemDto(122L, RIG_TYPE_ID,      3)    // 3 × 500M = 1.5B (destroyed → NOT subtracted)
+        )));
+        when(esiService.resolveTypeNamesBatch(any())).thenReturn(Map.of(
+                THANATOS_TYPE_ID, "Thanatos",
+                MODULE_TYPE_ID,   "Drone Damage Amplifier II",
+                RIG_TYPE_ID,      "Capital Trimark Armor Pump I"
+        ));
+        when(esiService.resolveGroupIdsBatch(any())).thenReturn(Map.of(
+                THANATOS_TYPE_ID, GROUP_CARRIER,
+                MODULE_TYPE_ID,   GROUP_MODULE,
+                RIG_TYPE_ID,      GROUP_RIG
+        ));
+        when(esiService.resolveRigGroupIds(any())).thenReturn(Set.of(GROUP_RIG));
+        when(esiService.fetchAveragePrices()).thenReturn(Map.of(
+                MODULE_TYPE_ID, bd("1000000"),   // 5 × 1M = 5,000,000
+                RIG_TYPE_ID,    bd("500000000")  // 3 × 500M = 1,500,000,000 (excluded)
+        ));
+
+        service.scan();
+
+        // nonCapItemValue = modules only = 5,000,000 (rigs excluded)
+        // effectiveCapitalPrice = 5,000,000,000 - 5,000,000 = 4,995,000,000
+        // totalItemValue = modules + rigs (carrier has no universe price → totalValueIncomplete)
+        Contract saved = captureFirstContract();
+        assertThat(saved.getNonCapItemValue()).isEqualByComparingTo(bd("5000000"));
+        assertThat(saved.getEffectiveCapitalPrice()).isEqualByComparingTo(bd("4995000000"));
+        assertThat(saved.getTotalItemValue()).isEqualByComparingTo(bd("1505000000")); // 5M modules + 1.5B rigs
+        assertThat(saved.getTotalValueIncomplete()).isTrue(); // carrier has no universe price
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

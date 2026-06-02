@@ -59,7 +59,7 @@ public interface MarketOrderRepository extends JpaRepository<MarketOrder, Long> 
         String  getTypeName();
         Integer getRegionId();
         BigDecimal getMinPrice();
-        Integer getVolumeAvailable();
+        Long getVolumeAvailable();
         BigDecimal getAveragePrice();
     }
 

@@ -5,7 +5,9 @@ import com.evemarket.backend.model.Contract;
 import com.evemarket.backend.model.ContractItem;
 import com.evemarket.backend.repository.ContractItemRepository;
 import com.evemarket.backend.repository.ContractRepository;
+import com.evemarket.backend.service.CharacterSession;
 import com.evemarket.backend.service.ContractScannerService;
+import com.evemarket.backend.service.EveSsoService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -38,6 +40,8 @@ class ContractControllerTest {
     @MockBean ContractRepository contractRepository;
     @MockBean ContractItemRepository contractItemRepository;
     @MockBean ContractScannerService contractScannerService;
+    @MockBean EveSsoService eveSsoService;
+    @MockBean CharacterSession characterSession;
 
     @Test
     void getCapitalContracts_returnsOkWithPageStructure() throws Exception {
@@ -103,16 +107,16 @@ class ContractControllerTest {
     }
 
     @Test
-    void getCapitalContracts_itemsSortedByVolumeDescending() throws Exception {
+    void getCapitalContracts_itemsSortedByValueDescending() throws Exception {
         Contract c = sampleContract(4L, 10000001);
 
-        // Sort is by total volume (qty × unitVol) descending:
-        //   Thanatos:  1 × 1 000 000 = 1 000 000
-        //   Tritanium: 500 × 5       = 2 500        ← beats Cap Rig on total
-        //   Cap Rig:   1 × 100       = 100
-        ContractItem cap   = sampleItem(4L, 23911, "Thanatos",  1,   true,  null,                      new BigDecimal("1000000"));
-        ContractItem rig   = sampleItem(4L, 31360, "Cap Rig",   1,   false, new BigDecimal("50000000"), new BigDecimal("100"));
-        ContractItem small = sampleItem(4L, 34,    "Tritanium", 500, false, new BigDecimal("1000"),     new BigDecimal("5"));
+        // Sort is by estimatedValue descending, nulls first (capitals have no estimated value):
+        //   Thanatos: null → first
+        //   Rig:      50,000,000 → second
+        //   Tritanium: 1,000     → third
+        ContractItem cap   = sampleItem(4L, 23911, "Thanatos",  1,   true,  null);
+        ContractItem rig   = sampleItem(4L, 31360, "Cap Rig",   1,   false, new BigDecimal("50000000"));
+        ContractItem small = sampleItem(4L, 34,    "Tritanium", 500, false, new BigDecimal("1000"));
 
         when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(c)));
@@ -122,28 +126,24 @@ class ContractControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].items", hasSize(3)))
                 .andExpect(jsonPath("$.content[0].items[0].typeName", is("Thanatos")))
-                .andExpect(jsonPath("$.content[0].items[0].packagedVolume", is(1000000)))
-                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Tritanium")))
-                .andExpect(jsonPath("$.content[0].items[1].packagedVolume", is(5)))
-                .andExpect(jsonPath("$.content[0].items[2].typeName", is("Cap Rig")))
-                .andExpect(jsonPath("$.content[0].items[2].packagedVolume", is(100)));
+                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Cap Rig")))
+                .andExpect(jsonPath("$.content[0].items[2].typeName", is("Tritanium")));
     }
 
     @Test
-    void getCapitalContracts_itemsWithNullVolumeSortedLast() throws Exception {
+    void getCapitalContracts_capitalWithNullValueSortedFirst() throws Exception {
         Contract c = sampleContract(5L, 10000001);
 
-        ContractItem withVol    = sampleItem(5L, 34,    "Tritanium", 1, false, null, new BigDecimal("5"));
-        ContractItem withoutVol = sampleItem(5L, 35,    "Pyerite",   1, false, null, null);
+        ContractItem cap   = sampleItem(5L, 23911, "Thanatos",  1, true,  null);
+        ContractItem extra = sampleItem(5L, 34,    "Tritanium", 1, false, new BigDecimal("34"));
 
         when(contractRepository.findActiveContracts(any(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(c)));
-        when(contractItemRepository.findByContractIdIn(List.of(5L))).thenReturn(List.of(withoutVol, withVol));
+        when(contractItemRepository.findByContractIdIn(List.of(5L))).thenReturn(List.of(extra, cap));
 
         mockMvc.perform(get("/api/contracts/capitals"))
-                .andExpect(jsonPath("$.content[0].items[0].typeName", is("Tritanium")))
-                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Pyerite")))
-                .andExpect(jsonPath("$.content[0].items[1].packagedVolume").doesNotExist());
+                .andExpect(jsonPath("$.content[0].items[0].typeName", is("Thanatos")))
+                .andExpect(jsonPath("$.content[0].items[1].typeName", is("Tritanium")));
     }
 
     @Test
